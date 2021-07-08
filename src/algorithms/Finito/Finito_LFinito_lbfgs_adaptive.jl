@@ -1,9 +1,9 @@
-struct FINITO_lbfgs_ada_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg, TH} <: CIAO_iterable
+struct FINITO_lbfgs_adaptive_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg, TH} <: CIAO_iterable
     F::Array{Tf}            # smooth term  
     g::Tg                   # nonsmooth term 
     x0::Tx                  # initial point
     N::Int                    # of data points in the finite sum problem 
-    L::Maybe{R}  # Lipschitz moduli of nabla f_i    
+    L::Maybe{Union{Array{R},R}}  # Lipschitz moduli of nabla f_i    
     γ::Maybe{Union{Array{R},R}}  # stepsizes 
     sweeping::Int8             # to only use one stepsize γ
     batch::Int                # batch size
@@ -13,8 +13,8 @@ struct FINITO_lbfgs_ada_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C
     tol_b::R
 end
 
-mutable struct FINITO_lbfgs_ada_state{R<:Real,Tx, TH}
-    γ::R                    # stepsize parameter
+mutable struct FINITO_lbfgs_adaptive_state{R<:Real,Tx, TH}
+    γ::R                    # stepsize parameter, plays the rolde of hat gamma  
     # γ::R                # average γ 
     av::Tx                  # the running average
     ind::Array{Array{Int}}  # running index set
@@ -24,8 +24,9 @@ mutable struct FINITO_lbfgs_ada_state{R<:Real,Tx, TH}
     sum_nrmx::R               # sum |x_i|^2
     sum_nabla::Tx            # sum \nabla f(x_i)
     sum_innprod::R           # sum  < \nabla f(x_i), x_i >
-    f_x::R                  # sum f(x_i)
-    # some extra placeholders                   
+    f_x::R                  # sum f(x_i) 
+    # some extra placeholders           
+    val_fg::R                   # value of g        
     z::Tx
     ∇f_temp::Tx             # placeholder for gradients 
     zbar::Tx                # bar z 
@@ -39,19 +40,18 @@ mutable struct FINITO_lbfgs_ada_state{R<:Real,Tx, TH}
     τ::Float64              # number of epochs
 end
 
-function FINITO_lbfgs_ada_state(γ::R, av::Tx, ind, d, H::TH, sum_nrmx, sum_nabla, sum_innprod, f_x) where {R,Tx,TH}
-    return FINITO_lbfgs_ada_state{R,Tx,TH}(
+function FINITO_lbfgs_adaptive_state(γ::R, av::Tx, ind, d, H::TH, sum_nrmx, sum_nabla, sum_innprod, f_x) where {R,Tx,TH}
+    return FINITO_lbfgs_adaptive_state{R,Tx,TH}(
         γ,
-        # γ,
         av,
         ind,
         d,
         H, 
-        # av_x, 
         sum_nrmx,
         sum_nabla,
         sum_innprod,
         f_x,
+        R(0),
         copy(av),
         copy(av),
         copy(av),
@@ -65,7 +65,7 @@ function FINITO_lbfgs_ada_state(γ::R, av::Tx, ind, d, H::TH, sum_nrmx, sum_nabl
         )
 end
 
-function Base.iterate(iter::FINITO_lbfgs_ada_iterable{R}) where {R}
+function Base.iterate(iter::FINITO_lbfgs_adaptive_iterable{R}) where {R}
     N = iter.N
     r = iter.batch # batch size 
     # create index sets 
@@ -83,7 +83,7 @@ function Base.iterate(iter::FINITO_lbfgs_ada_iterable{R}) where {R}
     for i = 1:N  # nabla f(x0)
         ∇f, fi_x = gradient(iter.F[i], iter.x0)
         sum_innprod += real(dot(∇f, iter.x0))
-        sum_nabla .-= ∇f
+        sum_nabla .+= ∇f
         f_x += fi_x
     end
 
@@ -94,7 +94,7 @@ function Base.iterate(iter::FINITO_lbfgs_ada_iterable{R}) where {R}
            av_eps = zero(iter.x0)
            for i in 1:N
                 ∇f, ~ = gradient(iter.F[i], xeps)
-                av_eps .-= ∇f
+                av_eps .+= ∇f
             end
             nmg = norm(sum_nabla - av_eps)
             t = 1
@@ -104,7 +104,7 @@ function Base.iterate(iter::FINITO_lbfgs_ada_iterable{R}) where {R}
                 av_eps = zero(iter.x0)
                 for i in 1:N
                     ∇f, ~ = gradient(iter.F[i], xeps)
-                    av_eps .-= ∇f
+                    av_eps .+= ∇f
                 end
                 # grad_f_xeps, f_xeps = gradient(iter.F[i], xeps)
                 nmg = norm(sum_nabla - av_eps)
@@ -122,21 +122,20 @@ function Base.iterate(iter::FINITO_lbfgs_ada_iterable{R}) where {R}
     else
         @warn "stepsize γ unspecified"
     end
-
     # update the average
-    av = copy(sum_nabla) .* γ / N
+    av = copy(sum_nabla) .* (-γ / N)
     av .+= iter.x0
 
     sum_nrmx = N * norm(iter.x0)^2
         
-    state = FINITO_lbfgs_ada_state(γ, av, ind, cld(N, r), iter.H, sum_nrmx, sum_nabla, sum_innprod, f_x)
+    state = FINITO_lbfgs_adaptive_state(γ, av, ind, cld(N, r), iter.H, sum_nrmx, sum_nabla, sum_innprod, f_x)
 
     return state, state
 end
 
 function Base.iterate(
-    iter::FINITO_lbfgs_ada_iterable{R},
-    state::FINITO_lbfgs_ada_state{R},
+    iter::FINITO_lbfgs_adaptive_iterable{R},
+    state::FINITO_lbfgs_adaptive_state{R},
 ) where {R}
     
     if state.zbar_prev === nothing
@@ -156,8 +155,10 @@ function Base.iterate(
 
         f_model_z = real(dot(state.zbar, state.av ))
         f_model_z -=  norm(state.zbar)^2 / 2
-        f_model_z .*= iter.N / state.γ
-        for i in 1:N 
+        # println("---------1------")
+
+        f_model_z *= iter.N / state.γ
+        for i in 1:iter.N 
             f_model_z += iter.F[i](state.zbar)
         end 
         
@@ -165,25 +166,24 @@ function Base.iterate(
         R(f_model_z) <= f_model_cnst + tol && break
 
         γ_prev = state.γ
-        state.γ *= 0.5
+        state.γ *= 0.8
         # update av
         state.av .-=  ((state.γ - γ_prev) / iter.N) .* state.sum_nabla
         reset!(state.H)
     end   
 
     state.f_x = R(0)
-    state.innerprod = R(0)
+    state.sum_innprod = R(0)
     # state.av .= state.zbar
-    state.sum_nabla .= zero(state.av)
+    state.sum_nabla = zero(state.av)
     for i = 1:iter.N
         state.∇f_temp, fi_z = gradient(iter.F[i], state.zbar) # update the gradient
         state.f_x += fi_z 
         state.sum_nabla .+= state.∇f_temp 
     end
-    state.innerprod += real(dot(state.sum_nabla,state.zbar))
+    state.sum_innprod += real(dot(state.sum_nabla,state.zbar))
 
     state.av .= state.zbar .- (state.γ / iter.N) .* state.sum_nabla
-
 
     state.sum_nrmx = norm(state.zbar)^2 * iter.N
     # full v update 
@@ -192,14 +192,14 @@ function Base.iterate(
             @warn "parameter `γ` became too small ($(state.γ))"
             return nothing
         end
-        state.res_zbar, gz = prox(iter.g, state.av, state.γ) # bar v update
+        state.val_fg = prox!(state.res_zbar, iter.g, state.av, state.γ) # bar v update
 
         f_model_cnst = state.sum_nrmx / (2 * state.γ) + state.f_x - state.sum_innprod   
 
         f_model_z = real(dot(state.res_zbar, state.av ))
         f_model_z -=  norm(state.res_zbar)^2 / 2
-        f_model_z .*= iter.N / state.γ
-        for i in 1:N 
+        f_model_z *= iter.N / state.γ
+        for i in 1:iter.N 
             f_model_z += iter.F[i](state.res_zbar)
         end 
         
@@ -207,27 +207,25 @@ function Base.iterate(
         R(f_model_z) <= f_model_cnst + tol && break
 
         γ_prev = state.γ
-        state.γ *= 0.5
+        state.γ *= 0.8
         # update av
         state.av .-=  ((state.γ - γ_prev) / iter.N) .* state.sum_nabla
         reset!(state.H)
     end   
-
     state.res_zbar .-= state.zbar # \bar v- \bar z 
     
     # prepare for linesearch: compute varphi(bar z) 
     envVal = state.f_x / iter.N
-    envVal += gz 
+    envVal += state.val_fg 
     envVal += real(dot(state.sum_nabla, state.res_zbar)) / iter.N
     envVal += norm(state.res_zbar)^2 / (2 *  state.γ)
 
     # update lbfgs
-    if state.zbar_prev !== nothing
-        update!(state.H, state.zbar - state.zbar_prev, -state.res_zbar +  state.res_zbar_prev) 
-        # store vectors for next update
-        copyto!(state.zbar_prev, state.zbar)
-        copyto!(state.res_zbar_prev, state.res_zbar)
-    end
+    update!(state.H, state.zbar - state.zbar_prev, -state.res_zbar +  state.res_zbar_prev) 
+    # store vectors for next update
+    copyto!(state.zbar_prev, state.zbar)
+    copyto!(state.res_zbar_prev, state.res_zbar)
+
     mul!(state.dir, state.H, state.res_zbar)
 
     state.τ = 1.0
@@ -236,7 +234,6 @@ function Base.iterate(
         state.z_trial .=  state.zbar .+ (1- state.τ) .* state.res_zbar + state.τ * state.dir
 
         # compute varphi(z_trial) 
-        # state.av .= state.z_trial
         state.sum_nabla = zero(state.av)
         envVal_trial = 0
         for i = 1:iter.N
@@ -248,8 +245,8 @@ function Base.iterate(
         state.av .-= (state.γ / iter.N) .* state.sum_nabla
 
         # prox( s(z^trial) )
-        state.z, gz = prox(iter.g, state.av, state.γ)
-        envVal_trial += gz
+        state.val_fg = prox!(state.z,iter.g, state.av, state.γ)
+        envVal_trial += state.val_fg
         state.z .-= state.z_trial # r_γ(z^trial) 
 
         envVal_trial += real(dot(state.sum_nabla, state.z)) / iter.N
@@ -263,12 +260,9 @@ function Base.iterate(
     ###### at the momoent I am computing the next prox twice (it is already computed in the ls) 
     iter.sweeping == 3 && (state.inds = randperm(state.d)) # shuffled
 
-    # state.sum_nabla .= zero(state.av)
     state.f_x = R(0)
     state.sum_innprod =  R(0)
     state.sum_nrmx =  R(0)
-
-    copyto!(state.dir,state.sum_nabla) # placeholder for sum nabla f_i(x^full)
     
     for j in state.inds
         for i in state.ind[j]
@@ -283,17 +277,17 @@ function Base.iterate(
 
                 fi_x = gradient!(state.∇f_temp, iter.F[i], state.zbar) # update the gradient
 
-                fi_z = iter.F[i](state.z)  ##### change to function value! #####
+                state.val_fg = iter.F[i](state.z)  ##### change to function value! #####
                 
                 state.z_trial .= state.z .- state.zbar # placeholder for z - x^full
 
                 fi_model = fi_x + real(dot(state.∇f_temp, state.z_trial)) + 
                     (0.5 * iter.α / state.γ) * (norm(state.z_trial)^2)
-                tol = eps(R) * (1 + abs(fi_z))
-                R(fi_z) <= fi_model + tol && break
+                tol = eps(R) * (1 + abs(state.val_fg))
+                R(state.val_fg) <= fi_model + tol && break
 
                 γ_prev = state.γ
-                state.γ *= 0.5
+                state.γ *= 0.8
                 # update av
                 state.av .-=  ((state.γ - γ_prev) / iter.N) .* state.sum_nabla
 
@@ -302,30 +296,31 @@ function Base.iterate(
 
             # iterates
             state.av .+= (state.γ / iter.N) .* state.∇f_temp
-            state.sum_nabla += state.∇f_temp # update sum nabla f_i for next iter    
+            state.sum_nabla -= state.∇f_temp # update sum nabla f_i for next iter    
             gradient!(state.∇f_temp, iter.F[i], state.z) # update the gradient
-            state.sum_nabla -= state.∇f_temp # update sum nabla f_i for next iter
+            state.sum_nabla += state.∇f_temp # update sum nabla f_i for next iter
             state.av .-= (state.γ / iter.N) .* state.∇f_temp
             state.av .+= (state.z .- state.zbar) ./ iter.N
 
             # updates for the next linesearch
-            state.f_x += fi_z
+            state.f_x += state.val_fg
             state.sum_nrmx   += norm(state.z)^2 
-            state.sum_nabla .+= state.∇f_temp
             state.sum_innprod += real(dot(state.∇f_temp, state.z)) 
         end
     end
+
+    println("current stepsize is $(state.γ)")
+
     return state, state
 end
 
-solution(state::FINITO_lbfgs_ada_state) = state.z
+solution(state::FINITO_lbfgs_adaptive_state) = state.z
 
 
-epoch_count(state::FINITO_lbfgs_ada_state) = state.τ   # number of epochs is 2+ 1/tau , where 1/tau is from ls 
+epoch_count(state::FINITO_lbfgs_adaptive_state) = state.τ   # number of epochs is 2+ 1/tau , where 1/tau is from ls 
 
 
 #### TODO: 
     # careful with the minibatch and adaptive stepsizes! 
     # stepsizes if gamma is given...
-    # sum_nabla and nablaf_sum are duplicate
-    # do not ineed second if for H
+    # add LS parameter as iter field

@@ -140,7 +140,7 @@ function (solver::Finito{R})(
             solver.DeepLFinito[3]
         )
         elseif solver.adaptive
-            iter = FINITO_lbfgs_ada_iterable(
+            iter = FINITO_lbfgs_adaptive_iterable(
                 F,
                 g,
                 x0,
@@ -316,7 +316,7 @@ function iterator(
             solver.DeepLFinito[3]
         )
         elseif solver.adaptive
-            iter = FINITO_lbfgs_ada_iterable(
+            iter = FINITO_lbfgs_adaptive_iterable(
                 F,
                 g,
                 x0,
