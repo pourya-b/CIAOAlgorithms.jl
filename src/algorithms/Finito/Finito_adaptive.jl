@@ -1,4 +1,4 @@
-struct FINITO_adaptive_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg}
+struct FINITO_adaptive_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg} <: CIAO_iterable
     F::Array{Tf}            # smooth term  
     g::Tg                   # nonsmooth term 
     x0::Tx                  # initial point
@@ -155,6 +155,9 @@ function Base.iterate(
 end
 
 solution(state::FINITO_adaptive_state) = state.z
+
+# count(state::FINITO_adaptive_state) = []
+
 
 #TODO list
 ## the initial guess for L may be modified

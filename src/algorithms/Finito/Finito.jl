@@ -17,23 +17,36 @@
 using LinearAlgebra
 using ProximalOperators
 using ProximalAlgorithms.IterationTools
+# using ProximalAlgorithms: LBFGS, update!, mul!
 using Printf
 using Base.Iterators
 using Random
 using StatsBase: sample
 
-export solution
+export solution, epoch_count
+
+
+abstract type CIAO_iterable end
+
 
 include("Finito_basic.jl")
 include("Finito_LFinito.jl")
 include("Finito_adaptive.jl")
+include("Finito_LFinito_lbfgs.jl")
+include("Finito_DLFinito.jl")
+include("Finito_DLFinito_lbfgs.jl")
+include("Finito_LFinito_lbfgs_adaptive.jl")
+
 
 
 struct Finito{R<:Real}
     γ::Maybe{Union{Array{R},R}}
     sweeping::Int8
     LFinito::Bool
+    lbfgs::Bool
+    memory::Int 
     adaptive::Bool
+    DeepLFinito::Tuple{Bool,Int, Int}
     minibatch::Tuple{Bool,Int}
     maxit::Int
     verbose::Bool
@@ -45,7 +58,11 @@ struct Finito{R<:Real}
         γ::Maybe{Union{Array{R},R}} = nothing,
         sweeping = 1,
         LFinito::Bool = false,
+        lbfgs::Bool = false,
+        memory::Int = 5,
         adaptive::Bool = false,
+        # DeepLFinito::Tuple{Bool,Int} = (false, 3),
+        DeepLFinito::Tuple{Bool,Int, Int} = (false, 3, 3),
         minibatch::Tuple{Bool,Int} = (false, 1),
         maxit::Int = 10000,
         verbose::Bool = false,
@@ -56,10 +73,11 @@ struct Finito{R<:Real}
     ) where {R}
         @assert γ === nothing || minimum(γ) > 0
         @assert maxit > 0
+        @assert memory >= 0
         @assert tol > 0
         @assert tol_b > 0
         @assert freq > 0
-        new(γ, sweeping, LFinito, adaptive, minibatch, maxit, verbose, freq, α, tol, tol_b)
+        new(γ, sweeping, LFinito, lbfgs, memory, adaptive, DeepLFinito, minibatch, maxit, verbose, freq, α, tol, tol_b)
     end
 end
 
@@ -78,7 +96,36 @@ function (solver::Finito{R})(
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
     if solver.LFinito
-        iter = FINITO_LFinito_iterable(
+        if solver.DeepLFinito[1]
+            iter = FINITO_DLFinito_iterable(
+                F,
+                g,
+                x0,
+                N,
+                L,
+                solver.γ,
+                solver.sweeping,
+                solver.minibatch[2],
+                solver.α,
+                solver.DeepLFinito[2],
+                solver.DeepLFinito[3],
+            )            
+        else 
+            iter = FINITO_LFinito_iterable(
+                F,
+                g,
+                x0,
+                N,
+                L,
+                solver.γ,
+                solver.sweeping,
+                solver.minibatch[2],
+                solver.α,
+            )
+        end
+    elseif solver.lbfgs
+        if solver.DeepLFinito[1]
+            iter = FINITO_DFlbfgs_iterable(
             F,
             g,
             x0,
@@ -88,7 +135,38 @@ function (solver::Finito{R})(
             solver.sweeping,
             solver.minibatch[2],
             solver.α,
+            LBFGS(x0, solver.memory),
+            solver.DeepLFinito[2],
+            solver.DeepLFinito[3]
         )
+        elseif solver.adaptive
+            iter = FINITO_lbfgs_adaptive_iterable(
+                F,
+                g,
+                x0,
+                N,
+                L,
+                solver.γ,
+                solver.sweeping,
+                solver.minibatch[2],
+                solver.α,
+                LBFGS(x0, solver.memory),
+                solver.adaptive
+            )
+        else 
+            iter = FINITO_lbfgs_iterable(
+                F,
+                g,
+                x0,
+                N,
+                L,
+                solver.γ,
+                solver.sweeping,
+                solver.minibatch[2],
+                solver.α,
+                LBFGS(x0, solver.memory),
+            )
+        end
     elseif solver.adaptive
         iter = FINITO_adaptive_iterable(
             F,
@@ -194,7 +272,36 @@ function iterator(
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
     if solver.LFinito
-        iter = FINITO_LFinito_iterable(
+        if solver.DeepLFinito[1]
+            iter = FINITO_DLFinito_iterable(
+                F,
+                g,
+                x0,
+                N,
+                L,
+                solver.γ,
+                solver.sweeping,
+                solver.minibatch[2],
+                solver.α,
+                solver.DeepLFinito[2],
+                solver.DeepLFinito[3],
+            )            
+        else 
+            iter = FINITO_LFinito_iterable(
+                F,
+                g,
+                x0,
+                N,
+                L,
+                solver.γ,
+                solver.sweeping,
+                solver.minibatch[2],
+                solver.α,
+            )
+        end
+    elseif solver.lbfgs
+        if solver.DeepLFinito[1]
+            iter = FINITO_DFlbfgs_iterable(
             F,
             g,
             x0,
@@ -204,7 +311,39 @@ function iterator(
             solver.sweeping,
             solver.minibatch[2],
             solver.α,
+            LBFGS(x0, solver.memory),
+            solver.DeepLFinito[2],
+            solver.DeepLFinito[3]
         )
+        elseif solver.adaptive
+            iter = FINITO_lbfgs_adaptive_iterable(
+                F,
+                g,
+                x0,
+                N,
+                L,
+                solver.γ,
+                solver.sweeping,
+                solver.minibatch[2],
+                solver.α,
+                LBFGS(x0, solver.memory),
+                solver.adaptive,
+                solver.tol_b,
+            )
+        else 
+            iter = FINITO_lbfgs_iterable(
+                F,
+                g,
+                x0,
+                N,
+                L,
+                solver.γ,
+                solver.sweeping,
+                solver.minibatch[2],
+                solver.α,
+                LBFGS(x0, solver.memory),
+            )
+        end
     elseif solver.adaptive
         iter = FINITO_adaptive_iterable(
             F,
