@@ -32,6 +32,7 @@ abstract type CIAO_iterable end
 include("Finito_basic.jl")
 include("Finito_LFinito.jl")
 include("Finito_adaptive.jl")
+include("Finito_LFinito_Newton.jl")
 include("Finito_LFinito_lbfgs.jl")
 include("Finito_DLFinito.jl")
 include("Finito_DLFinito_lbfgs.jl")
@@ -43,6 +44,7 @@ struct Finito{R<:Real}
     γ::Maybe{Union{Array{R},R}}
     sweeping::Int8
     LFinito::Bool
+    Newton::Bool
     lbfgs::Bool
     memory::Int 
     adaptive::Bool
@@ -58,6 +60,7 @@ struct Finito{R<:Real}
         γ::Maybe{Union{Array{R},R}} = nothing,
         sweeping = 1,
         LFinito::Bool = false,
+        Newton::Bool = false,
         lbfgs::Bool = false,
         memory::Int = 5,
         adaptive::Bool = false,
@@ -77,7 +80,7 @@ struct Finito{R<:Real}
         @assert tol > 0
         @assert tol_b > 0
         @assert freq > 0
-        new(γ, sweeping, LFinito, lbfgs, memory, adaptive, DeepLFinito, minibatch, maxit, verbose, freq, α, tol, tol_b)
+        new(γ, sweeping, LFinito, Newton, lbfgs, memory, adaptive, DeepLFinito, minibatch, maxit, verbose, freq, α, tol, tol_b)
     end
 end
 
@@ -123,6 +126,18 @@ function (solver::Finito{R})(
                 solver.α,
             )
         end
+    elseif solver.Newton
+        iter = FINITO_Newton_iterable(
+            F,
+            g,
+            x0,
+            N,
+            L,
+            solver.γ,
+            solver.sweeping,
+            solver.minibatch[2],
+            solver.α,
+        )
     elseif solver.lbfgs
         if solver.DeepLFinito[1]
             iter = FINITO_DFlbfgs_iterable(
@@ -140,7 +155,7 @@ function (solver::Finito{R})(
             solver.DeepLFinito[3]
         )
         elseif solver.adaptive
-            iter = FINITO_lbfgs_adaptive_iterable(
+            iter = FINITO_lbfgs_ada_iterable(
                 F,
                 g,
                 x0,
@@ -299,6 +314,18 @@ function iterator(
                 solver.α,
             )
         end
+    elseif solver.Newton
+        iter = FINITO_Newton_iterable(
+            F,
+            g,
+            x0,
+            N,
+            L,
+            solver.γ,
+            solver.sweeping,
+            solver.minibatch[2],
+            solver.α,
+        )
     elseif solver.lbfgs
         if solver.DeepLFinito[1]
             iter = FINITO_DFlbfgs_iterable(
@@ -316,7 +343,7 @@ function iterator(
             solver.DeepLFinito[3]
         )
         elseif solver.adaptive
-            iter = FINITO_lbfgs_adaptive_iterable(
+            iter = FINITO_lbfgs_ada_iterable(
                 F,
                 g,
                 x0,

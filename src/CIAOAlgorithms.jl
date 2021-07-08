@@ -5,6 +5,9 @@ const Maybe{T} = Union{T, Nothing}
 
 # utulities 
 include("utilities/indexingUtilities.jl")
+include("utilities/IndexIterator.jl")
+include("utilities/lbfgs.jl")
+
 
 # algorithms 
 include("algorithms/Finito/Finito.jl")
