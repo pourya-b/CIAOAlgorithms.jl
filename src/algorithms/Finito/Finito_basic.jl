@@ -1,4 +1,4 @@
-struct FINITO_basic_iterable{R<:Real,C<:Union{R,Complex{R}},Tx<:AbstractArray{C},Tf,Tg}
+struct FINITO_basic_iterable{R<:Real,C<:Union{R,Complex{R}},Tx<:AbstractArray{C},Tf,Tg} <: CIAO_iterable
     F::Array{Tf}            # smooth term  
     g::Tg                   # nonsmooth term 
     x0::Tx                  # initial point
@@ -121,6 +121,9 @@ function Base.iterate(
 end
 
 solution(state::FINITO_basic_state) = state.z
+
+
+# count(state::FINITO_basic_state) = []
 
 #TODO list
 ## in cyclic/shuffled minibatchs are static  
