@@ -155,7 +155,6 @@ function Base.iterate(
 
         f_model_z = real(dot(state.zbar, state.av ))
         f_model_z -=  norm(state.zbar)^2 / 2
-        # println("---------1------")
 
         f_model_z *= iter.N / state.γ
         for i in 1:iter.N 
@@ -309,7 +308,7 @@ function Base.iterate(
         end
     end
 
-    println("current stepsize is $(state.γ)")
+    # println("current stepsize is $(state.γ)")
 
     return state, state
 end

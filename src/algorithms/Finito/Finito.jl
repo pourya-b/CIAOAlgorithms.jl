@@ -371,3 +371,8 @@ function iterator(
     end
     return iter
 end
+
+
+
+#### TODO
+    # remove finito_adaptive
