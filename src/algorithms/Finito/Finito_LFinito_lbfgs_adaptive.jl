@@ -1,4 +1,4 @@
-struct FINITO_lbfgs_adaptive_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg, TH} <: CIAO_iterable
+struct FINITO_lbfgs_ada_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg, TH} <: CIAO_iterable
     F::Array{Tf}            # smooth term  
     g::Tg                   # nonsmooth term 
     x0::Tx                  # initial point
@@ -13,7 +13,7 @@ struct FINITO_lbfgs_adaptive_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractAr
     tol_b::R
 end
 
-mutable struct FINITO_lbfgs_adaptive_state{R<:Real,Tx, TH}
+mutable struct FINITO_lbfgs_ada_state{R<:Real,Tx, TH}
     γ::R                    # stepsize parameter
     # γ::R                # average γ 
     av::Tx                  # the running average
@@ -39,8 +39,8 @@ mutable struct FINITO_lbfgs_adaptive_state{R<:Real,Tx, TH}
     τ::Float64              # number of epochs
 end
 
-function FINITO_lbfgs_adaptive_state(γ::R, av::Tx, ind, d, H::TH, sum_nrmx, sum_nabla, sum_innprod, f_x) where {R,Tx,TH}
-    return FINITO_lbfgs_adaptive_state{R,Tx,TH}(
+function FINITO_lbfgs_ada_state(γ::R, av::Tx, ind, d, H::TH, sum_nrmx, sum_nabla, sum_innprod, f_x) where {R,Tx,TH}
+    return FINITO_lbfgs_ada_state{R,Tx,TH}(
         γ,
         # γ,
         av,
@@ -65,7 +65,7 @@ function FINITO_lbfgs_adaptive_state(γ::R, av::Tx, ind, d, H::TH, sum_nrmx, sum
         )
 end
 
-function Base.iterate(iter::FINITO_lbfgs_adaptive_iterable{R}) where {R}
+function Base.iterate(iter::FINITO_lbfgs_ada_iterable{R}) where {R}
     N = iter.N
     r = iter.batch # batch size 
     # create index sets 
@@ -129,14 +129,14 @@ function Base.iterate(iter::FINITO_lbfgs_adaptive_iterable{R}) where {R}
 
     sum_nrmx = N * norm(iter.x0)^2
         
-    state = FINITO_lbfgs_adaptive_state(γ, av, ind, cld(N, r), iter.H, sum_nrmx, sum_nabla, sum_innprod, f_x)
+    state = FINITO_lbfgs_ada_state(γ, av, ind, cld(N, r), iter.H, sum_nrmx, sum_nabla, sum_innprod, f_x)
 
     return state, state
 end
 
 function Base.iterate(
-    iter::FINITO_lbfgs_adaptive_iterable{R},
-    state::FINITO_lbfgs_adaptive_state{R},
+    iter::FINITO_lbfgs_ada_iterable{R},
+    state::FINITO_lbfgs_ada_state{R},
 ) where {R}
     
     if state.zbar_prev === nothing
@@ -318,10 +318,10 @@ function Base.iterate(
     return state, state
 end
 
-solution(state::FINITO_lbfgs_adaptive_state) = state.z
+solution(state::FINITO_lbfgs_ada_state) = state.z
 
 
-epoch_count(state::FINITO_lbfgs_adaptive_state) = state.τ   # number of epochs is 2+ 1/tau , where 1/tau is from ls 
+epoch_count(state::FINITO_lbfgs_ada_state) = state.τ   # number of epochs is 2+ 1/tau , where 1/tau is from ls 
 
 
 #### TODO: 
