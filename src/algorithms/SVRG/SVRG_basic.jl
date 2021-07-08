@@ -30,7 +30,7 @@ end
 function Base.iterate(iter::SVRG_basic_iterable{R}) where {R}
     N = iter.N
     ind = collect(1:N)
-    m = iter.m === nothing ? m = N : m = iter.m
+    m = iter.m === nothing ? m = 2 * N : m = iter.m
     # updating the stepsize 
     if iter.γ === nothing
         if iter.plus

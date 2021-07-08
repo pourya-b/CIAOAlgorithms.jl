@@ -1,4 +1,4 @@
-struct FINITO_LFinito_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg}
+struct FINITO_LFinito_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg} <: CIAO_iterable
     F::Array{Tf}            # smooth term  
     g::Tg                   # nonsmooth term 
     x0::Tx                  # initial point
@@ -88,6 +88,7 @@ function Base.iterate(
     end
     iter.sweeping == 3 && (state.inds = randperm(state.d)) # shuffled
 
+
     for j in state.inds
         prox!(state.z, iter.g, state.av, state.hat_γ)
         for i in state.ind[j]
@@ -98,8 +99,17 @@ function Base.iterate(
             state.av .+= (state.hat_γ / state.γ[i]) .* (state.z .- state.z_full)
         end
     end
-
+    
     return state, state
 end
 
+# function solution(state::FINITO_LFinito_state) 
+#     sol = copy(state.z_full)
+#     prox!(sol, iter.g, state.av, state.hat_γ)
+#     return sol
+# end 
+
+
 solution(state::FINITO_LFinito_state) = state.z
+
+# count(state::FINITO_LFinito_state) = []
