@@ -4,11 +4,11 @@
 #
 # Latafat. "Distributed proximal algorithms for large-scale structured optimization"
 # PhD thesis, KU Leuven, 7 2020.
-# 
+#
 # Mairal, "Incremental majorization-minimization optimization with application to
 # large-scale machine learning."
 # SIAM Journal on Optimization 25, 2 (2015), 829–855.
-# 
+#
 # Defazio, Domke, "Finito: A faster, permutable incremental gradient method
 # for big data problems."
 # In International Conference on Machine Learning (2014), pp. 1125-1133.
@@ -19,14 +19,14 @@ using ProximalOperators
 using ProximalAlgorithms.IterationTools
 # using ProximalAlgorithms: LBFGS, update!, mul!
 using Printf
-using Base.Iterators
+using Base.Iterators # to use take and enumerate functions
 using Random
 using StatsBase: sample
 
 export solution, epoch_count
 
 
-abstract type CIAO_iterable end
+abstract type CIAO_iterable end #? what is this? where is used?
 
 
 include("Finito_basic.jl")
@@ -40,11 +40,11 @@ include("Finito_LFinito_lbfgs_adaptive.jl")
 
 
 struct Finito{R<:Real}
-    γ::Maybe{Union{Array{R},R}}
+    γ::Maybe{Union{Array{R},R}} #? this is defined in CIAOAlgorithms, where CIAOAlgorithms is called/used? #other questions in that file ...
     sweeping::Int8
     LFinito::Bool
     lbfgs::Bool
-    memory::Int 
+    memory::Int
     adaptive::Bool
     DeepLFinito::Tuple{Bool,Int, Int}
     minibatch::Tuple{Bool,Int}
@@ -67,7 +67,7 @@ struct Finito{R<:Real}
         maxit::Int = 10000,
         verbose::Bool = false,
         freq::Int = 10000,
-        α::R = R(0.999),
+        α::R = R(0.999), # R is type
         tol::R = R(1e-8),
         tol_b::R = R(1e-9),
     ) where {R}
@@ -81,7 +81,7 @@ struct Finito{R<:Real}
     end
 end
 
-function (solver::Finito{R})(
+function (solver::Finito{R})( #? we can break the arguments? how it is called?
     x0::AbstractArray{C};
     F = nothing,
     g = ProximalOperators.Zero(),
@@ -89,7 +89,7 @@ function (solver::Finito{R})(
     N = N,
 ) where {R,C<:RealOrComplex{R}}
 
-    stop(state) = false
+    stop(state) = false # the stopping function for halt function
 
     disp(it, state) = @printf "%5d | %.3e  \n" it state.hat_γ
 
@@ -109,8 +109,8 @@ function (solver::Finito{R})(
                 solver.α,
                 solver.DeepLFinito[2],
                 solver.DeepLFinito[3],
-            )            
-        else 
+            )
+        else
             iter = FINITO_LFinito_iterable(
                 F,
                 g,
@@ -153,7 +153,7 @@ function (solver::Finito{R})(
                 LBFGS(x0, solver.memory),
                 solver.adaptive
             )
-        else 
+        else
             iter = FINITO_lbfgs_iterable(
                 F,
                 g,
@@ -193,11 +193,12 @@ function (solver::Finito{R})(
         )
     end
 
-    iter = take(halt(iter, stop), solver.maxit)
+    iter = halt(iter, stop) #? where is halt defined?
+    iter = take(iter, solver.maxit)
     iter = enumerate(iter)
 
     num_iters, state_final = nothing, nothing
-    for (it_, state_) in iter  # unrolling the iterator 
+    for (it_, state_) in iter  # unrolling the iterator (acts as tee and loop functions in the tutorial)
         # see https://docs.julialang.org/en/v1/manual/interfaces/index.html
         if solver.verbose && mod(it_, solver.freq) == 0
             disp(it_, state_)
@@ -214,24 +215,24 @@ end
     Finito([γ, sweeping, LFinito, adaptive, minibatch, maxit, verbose, freq, tol, tol_b])
 
 Instantiate the Finito algorithm for solving fully nonconvex optimization problems of the form
-    
+
     minimize 1/N sum_{i=1}^N f_i(x) + g(x)
 
-where `f_i` are smooth and `g` is possibly nonsmooth, all of which may be nonconvex.  
+where `f_i` are smooth and `g` is possibly nonsmooth, all of which may be nonconvex.
 
 If `solver = Finito(args...)`, then the above problem is solved with
 
 	solver(x0, [F, g, N, L])
 
-where F is an array containing f_i's, x0 is the initial point, and L is an array of 
-smoothness moduli of f_i's; it is optional in the adaptive mode or if γ is provided. 
+where F is an array containing f_i's, x0 is the initial point, and L is an array of
+smoothness moduli of f_i's; it is optional in the adaptive mode or if γ is provided.
 
 Optional keyword arguments are:
-* `γ`: an array of N stepsizes for each coordinate 
-* `sweeping::Int` 1 for uniform randomized (default), 2 for cyclic, 3 for shuffled 
+* `γ`: an array of N stepsizes for each coordinate
+* `sweeping::Int` 1 for uniform randomized (default), 2 for cyclic, 3 for shuffled
 * `LFinito::Bool` low memory variant of the Finito/MISO algorithm
 * `adaptive::Bool` to activate adaptive smoothness parameter computation
-* `minibatch::(Bool,Int)` to use batchs of a given size    
+* `minibatch::(Bool,Int)` to use batchs of a given size
 * `maxit::Integer` (default: `10000`), maximum number of iterations to perform.
 * `verbose::Bool` (default: `true`), whether or not to print information during the iterations.
 * `freq::Integer` (default: `10000`), frequency of verbosity.
@@ -240,28 +241,28 @@ Optional keyword arguments are:
 * `tol_b::R` tolerance for the backtrack (default: `1e-9`)
 """
 
-Finito(::Type{R}; kwargs...) where {R} = Finito{R}(; kwargs...)
+Finito(::Type{R}; kwargs...) where {R} = Finito{R}(; kwargs...) #? outer constructor? why is needed? where it is used? Type{R}?
 Finito(; kwargs...) = Finito(Float64; kwargs...)
 
 
 """
-If `solver = Finito(args...)`, then 
+If `solver = Finito(args...)`, then
 
     itr = iterator(solver, x0, [F, g, N, L])
 
-is an iterable object. Note that [maxit, verbose, freq] fields of the solver are ignored here. 
+is an iterable object. Note that [maxit, verbose, freq] fields of the solver are ignored here.
 
-The solution at any given state can be obtained using solution(state), e.g., 
+The solution at any given state can be obtained using solution(state), e.g.,
 for state in Iterators.take(itr, maxit)
     # do something using solution(state)
 end
 
-See https://docs.julialang.org/en/v1/manual/interfaces/index.html 
+See https://docs.julialang.org/en/v1/manual/interfaces/index.html
 and https://docs.julialang.org/en/v1/base/iterators/ for a list of iteration utilities
 """
 
 
-function iterator(
+function iterator( #? how it is called?
     solver::Finito{R},
     x0::AbstractArray{C};
     F = nothing,
@@ -285,8 +286,8 @@ function iterator(
                 solver.α,
                 solver.DeepLFinito[2],
                 solver.DeepLFinito[3],
-            )            
-        else 
+            )
+        else
             iter = FINITO_LFinito_iterable(
                 F,
                 g,
@@ -330,7 +331,7 @@ function iterator(
                 solver.adaptive,
                 solver.tol_b,
             )
-        else 
+        else
             iter = FINITO_lbfgs_iterable(
                 F,
                 g,
