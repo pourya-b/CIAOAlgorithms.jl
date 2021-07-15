@@ -188,7 +188,7 @@ function Base.iterate(
                 copyto!(state.z_M[ell], state.zbar)
             end             
         end
-        # println(ind)
+        println(ind)
         prox!(state.z_M[ind.m_n], iter.g, state.av, state.hat_γ)
                 
         gradient!(state.∇f_temp, iter.F[state.inds[ind.i]], state.z_M[ind.m_o]) # update the gradient
@@ -208,7 +208,5 @@ epoch_count(state::FINITO_DFlbfgs_state) = state.τ   # number of epochs is 2+ 1
 
 
 
-#TODO: 
-    # there is some bug when rep inseq =(1,1) it is not working......check after adding adaptive stepsizes!!!!
 
-    
+###### there is some bug when rep inseq =(1,1) it is not working......check after adding adaptive stepsizes!!!!
