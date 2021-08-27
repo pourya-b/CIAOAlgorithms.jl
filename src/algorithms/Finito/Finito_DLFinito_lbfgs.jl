@@ -8,9 +8,9 @@ struct FINITO_DFlbfgs_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},
     sweeping::Int8             # to only use one stepsize γ
     batch::Int                # batch size
     α::R                    # in (0, 1), e.g.: 0.99
-    H::TH                   # for lbfgs 
-    inseq::Int              # extra memory needed = length of inner seq (excluding z)                        # exm: 1231231234234234... as memory = 3
-    rep::Int                # number of reps for each index
+    H::TH                   # for lbfgs (lbfgs type)
+    inseq::Int              # extra 'memory length' needed = length of inner seq (excluding z)   # exm: 1231231234234234... as memory = 3
+    rep::Int                # number of reps for each index   # how many times 123 is repeated
 end
 
 mutable struct FINITO_DFlbfgs_state{R<:Real,Tx, TH}
@@ -20,7 +20,7 @@ mutable struct FINITO_DFlbfgs_state{R<:Real,Tx, TH}
     ind::Array{Array{Int}}  # running index set
     d::Int                  # number of batches 
     H::TH                   # Hessian approx
-    z_M::Vector{Tx}
+    z_M::Vector{Tx}         # palceholder for z vectors 
     # some extra placeholders 
     z::Tx
     ∇f_temp::Tx             # placeholder for gradients 
@@ -126,7 +126,7 @@ function Base.iterate(
 
     state.res_zbar .-= state.zbar # \bar v- \bar z 
 
-    if state.zbar_prev !== nothing
+    if state.zbar_prev !== nothing # for lbfgs
         # update metric ##### bug prone  v = -res not res
         update!(state.H, state.zbar - state.zbar_prev, -state.res_zbar +  state.res_zbar_prev) 
         # store vectors for next update
@@ -178,20 +178,20 @@ function Base.iterate(
     iter.sweeping == 3 && (state.inds = randperm(state.d)) # shuffled
 
     # println("rep is $(iter.rep)")
-    Ind = Index_iterable(1, iter.inseq, iter.rep, iter.N)
+    Ind = Index_iterable(1, iter.inseq, iter.rep, iter.N) # in CIAO utilities
 
-    for (it, ind) in Iterators.enumerate(Ind)
+    for (it, ind) in Iterators.enumerate(Ind) # here we don't have batches
         # println(it)
         if mod(it, iter.inseq * iter.rep) == 1
             # println("------new cycle starts-----")
             for ell in 1:(iter.inseq+1)       # for initializing the inner loop
-                copyto!(state.z_M[ell], state.zbar)
+                copyto!(state.z_M[ell], state.zbar) # resetting with zbar: x^full
             end             
         end
-        println(ind)
-        prox!(state.z_M[ind.m_n], iter.g, state.av, state.hat_γ)
+        println(ind) 
+        prox!(state.z_M[ind.m_n], iter.g, state.av, state.hat_γ) # always m_o is 1 larger than m_n
                 
-        gradient!(state.∇f_temp, iter.F[state.inds[ind.i]], state.z_M[ind.m_o]) # update the gradient
+        gradient!(state.∇f_temp, iter.F[state.inds[ind.i]], state.z_M[ind.m_o]) # update the gradient - ind.i counts 123123123456...
         state.av .+= (state.hat_γ / iter.N) .* state.∇f_temp
         gradient!(state.∇f_temp, iter.F[state.inds[ind.i]], state.z_M[ind.m_n]) # update the gradient
         state.av .-= (state.hat_γ / iter.N) .* state.∇f_temp
@@ -202,8 +202,6 @@ function Base.iterate(
 end
 
 solution(state::FINITO_DFlbfgs_state) = state.z_M[end]
-
-
 epoch_count(state::FINITO_DFlbfgs_state) = state.τ   # number of epochs is 2+ 1/tau , where 1/tau is from ls 
 
 
