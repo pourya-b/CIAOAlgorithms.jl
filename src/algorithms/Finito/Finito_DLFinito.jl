@@ -1,10 +1,10 @@
 struct FINITO_DLFinito_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg} <: CIAO_iterable
-    F::Array{Tf}            # smooth term  
-    g::Tg                   # nonsmooth term 
+    F::Array{Tf}            # smooth term
+    g::Tg                   # nonsmooth term
     x0::Tx                  # initial point
-    N::Int                    # of data points in the finite sum problem 
-    L::Maybe{Union{Array{R},R}}  # Lipschitz moduli of nabla f_i    
-    γ::Maybe{Union{Array{R},R}}  # stepsizes 
+    N::Int                    # of data points in the finite sum problem
+    L::Maybe{Union{Array{R},R}}  # Lipschitz moduli of nabla f_i
+    γ::Maybe{Union{Array{R},R}}  # stepsizes
     sweeping::Int8          # to only use one stepsize γ
     batch::Int              # batch size
     α::R                    # in (0, 1), e.g.: 0.99
@@ -14,18 +14,18 @@ end
 
 mutable struct FINITO_DLFinito_state{R<:Real,Tx}
     γ::Array{R}             # stepsize parameter
-    hat_γ::R                # average γ 
+    hat_γ::R                # average γ
     av::Tx                  # the running average
     ind::Array{Array{Int}}  # running index set
-    d::Int                  # number of batches 
+    d::Int                  # number of batches
     z_M::Vector{Tx}
-    # some extra placeholders 
-    ∇f_temp::Tx             # placeholder for gradients 
+    # some extra placeholders
+    ∇f_temp::Tx             # placeholder for gradients
     z_full::Tx
-    inds::Array{Int}        # needed for shuffled only! 
+    inds::Array{Int}        # needed for shuffled only!
 end
 
-function FINITO_DLFinito_state(γ::Array{R}, hat_γ::R, av::Tx, ind, d, z_M) where {R,Tx}
+function FINITO_DLFinito_state(γ::Array{R}, hat_γ::R, av::Tx, ind, d, z_M) where {R,Tx} # why this function is needed?
     return FINITO_DLFinito_state{R,Tx}(
         γ,
         hat_γ,
@@ -39,17 +39,17 @@ function FINITO_DLFinito_state(γ::Array{R}, hat_γ::R, av::Tx, ind, d, z_M) whe
     )
 end
 
-function Base.iterate(iter::FINITO_DLFinito_iterable{R}) where {R}
+function Base.iterate(iter::FINITO_DLFinito_iterable{R}) where {R} # rewriting Base?
     N = iter.N
-    r = iter.batch # batch size 
-    # create index sets 
+    r = iter.batch # batch size
+    # create index sets
     ind = Vector{Vector{Int}}(undef, 0)
     d = Int(floor(N / r))
     for i = 1:d
         push!(ind, collect(r*(i-1)+1:i*r))
     end
     r * d < N && push!(ind, collect(r*d+1:N))
-    # updating the stepsize 
+    # updating the stepsize
     if iter.γ === nothing
         if iter.L === nothing
             @warn "--> smoothness parameter absent"
@@ -64,7 +64,7 @@ function Base.iterate(iter::FINITO_DLFinito_iterable{R}) where {R}
     else
         isa(iter.γ, R) ? (γ = fill(iter.γ, (N,))) : (γ = iter.γ) # provided γ
     end
-    #initializing the vectors 
+    #initializing the vectors
     hat_γ = 1 / sum(1 ./ γ)
     av = copy(iter.x0)
     for i = 1:N
@@ -84,7 +84,7 @@ function Base.iterate(
     iter::FINITO_DLFinito_iterable{R},
     state::FINITO_DLFinito_state{R},
 ) where {R}
-    # full update 
+    # full update
     prox!(state.z_full, iter.g, state.av, state.hat_γ)
     state.av .= (iter.N / state.hat_γ ) .* state.z_full
     for i = 1:iter.N
@@ -108,17 +108,17 @@ function Base.iterate(
             # println("------new cycle starts-----")
             for ell in 1:(iter.inseq+1)       # for initializing the inner loop
                 copyto!(state.z_M[ell], state.z_full)
-            end             
+            end
         end
         # println(ind)
         prox!(state.z_M[ind.m_n], iter.g, state.av, state.hat_γ)
-                
+
         gradient!(state.∇f_temp, iter.F[state.inds[ind.i]], state.z_M[ind.m_o]) # update the gradient
         state.av .+= (state.hat_γ / iter.N) .* state.∇f_temp
         gradient!(state.∇f_temp, iter.F[state.inds[ind.i]], state.z_M[ind.m_n]) # update the gradient
         state.av .-= (state.hat_γ / iter.N) .* state.∇f_temp
         state.av .+= (state.hat_γ / state.γ[state.inds[ind.i]]) .* (state.z_M[ind.m_n] .- state.z_M[ind.m_o])
-    end 
+    end
 
     return state, state
 end
@@ -129,13 +129,11 @@ solution(state::FINITO_DLFinito_state) = state.z_M[end]
 
 
 # taking prox to be able to have consistent output without knowing the last z_M cell updated
-# function solution(state::FINITO_DLFinito_state) 
+# function solution(state::FINITO_DLFinito_state)
 #     sol = copy(state.z_full)
 #     prox!(sol, iter.g, state.av, state.hat_γ)
 #     return sol
-# end 
+# end
 
 
 # count(state::FINITO_DLFinito_state) = []
-
-

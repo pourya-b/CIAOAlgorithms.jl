@@ -52,7 +52,7 @@ end
 
 function Base.iterate(iter::SAGA_basic_iterable{R}, state::SAGA_basic_state{R}) where {R}
 
-    state.ind = rand(1:iter.N)
+    state.ind = rand(1:iter.N) # one random number (b=1)
     gradient!(state.∇f_temp, iter.F[state.ind], state.z)
     if iter.SAG
         @. state.av += (state.∇f_temp - state.s[state.ind]) / iter.N
@@ -67,8 +67,5 @@ function Base.iterate(iter::SAGA_basic_iterable{R}, state::SAGA_basic_state{R}) 
     return state, state
 end
 
-
 solution(state::SAGA_basic_state) = state.z
-
-
 #TODO: minibatch

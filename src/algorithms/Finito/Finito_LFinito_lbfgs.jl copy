@@ -1,4 +1,4 @@
-struct FINITO_DFlbfgs_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg, TH} <: CIAO_iterable
+struct FINITO_lbfgs_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg, TH} <: CIAO_iterable
     F::Array{Tf}            # smooth term  
     g::Tg                   # nonsmooth term 
     x0::Tx                  # initial point
@@ -8,19 +8,16 @@ struct FINITO_DFlbfgs_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},
     sweeping::Int8             # to only use one stepsize γ
     batch::Int                # batch size
     α::R                    # in (0, 1), e.g.: 0.99
-    H::TH                   # for lbfgs (lbfgs type)
-    inseq::Int              # extra 'memory length' needed = length of inner seq (excluding z)   # exm: 1231231234234234... as memory = 3
-    rep::Int                # number of reps for each index   # how many times 123 is repeated
+    H::TH                   # LBFGS struct
 end
 
-mutable struct FINITO_DFlbfgs_state{R<:Real,Tx, TH}
+mutable struct FINITO_lbfgs_state{R<:Real,Tx, TH}
     γ::Array{R}             # stepsize parameter
     hat_γ::R                # average γ 
     av::Tx                  # the running average
     ind::Array{Array{Int}}  # running index set
     d::Int                  # number of batches 
-    H::TH                   # Hessian approx
-    z_M::Vector{Tx}         # palceholder for z vectors 
+    H::TH                   # Hessian approx (LBFGS struct)
     # some extra placeholders 
     z::Tx
     ∇f_temp::Tx             # placeholder for gradients 
@@ -35,15 +32,14 @@ mutable struct FINITO_DFlbfgs_state{R<:Real,Tx, TH}
     τ::Float64              # number of epochs
 end
 
-function FINITO_DFlbfgs_state(γ::Array{R}, hat_γ::R, av::Tx, ind, d, H::TH, z_M) where {R,Tx,TH}
-    return FINITO_DFlbfgs_state{R,Tx,TH}(
+function FINITO_lbfgs_state(γ::Array{R}, hat_γ::R, av::Tx, ind, d, H::TH) where {R,Tx,TH}
+    return FINITO_lbfgs_state{R,Tx,TH}(
         γ,
         hat_γ,
         av,
         ind,
         d,
         H, 
-        z_M,
         copy(av),
         copy(av),
         copy(av),
@@ -58,7 +54,7 @@ function FINITO_DFlbfgs_state(γ::Array{R}, hat_γ::R, av::Tx, ind, d, H::TH, z_
         )
 end
 
-function Base.iterate(iter::FINITO_DFlbfgs_iterable{R}) where {R}
+function Base.iterate(iter::FINITO_lbfgs_iterable{R}) where {R}
     N = iter.N
     r = iter.batch # batch size 
     # create index sets 
@@ -91,50 +87,51 @@ function Base.iterate(iter::FINITO_DFlbfgs_iterable{R}) where {R}
         ∇f .*= hat_γ / N
         av .-= ∇f
     end
-    z_M = [copy(av) for i = 1:(iter.inseq+1)]
-
-
-    state = FINITO_DFlbfgs_state(γ, hat_γ, av, ind, cld(N, r), iter.H, z_M)
+    state = FINITO_lbfgs_state(γ, hat_γ, av, ind, cld(N, r), iter.H)
 
     return state, state
 end
 
 function Base.iterate(
-    iter::FINITO_DFlbfgs_iterable{R},
-    state::FINITO_DFlbfgs_state{R},
+    iter::FINITO_lbfgs_iterable{R},
+    state::FINITO_lbfgs_state{R},
 ) where {R}
     
-    if state.zbar_prev === nothing
+    if state.zbar_prev === nothing # for bfgs updates
         state.zbar_prev = zero(state.z)
         state.res_zbar_prev = zero(state.z)
     end
 
     # full update 
+    # state.zbar, gz = prox(iter.g, state.av, state.hat_γ)
+    # envVal = gz
     state.zbar, ~ = prox(iter.g, state.av, state.hat_γ)
-    envVal = 0.0
+    envVal = 0.0 # build by (1.1)
     state.av .= state.zbar
     state.∇f_sum .= zero(state.av)
     for i = 1:iter.N
         state.∇f_temp, fi_z = gradient(iter.F[i], state.zbar) # update the gradient
         state.av .-= (state.hat_γ / iter.N) .* state.∇f_temp
-        envVal += fi_z / iter.N
+        envVal += fi_z / iter.N # build by (1.1) - first part
         state.∇f_sum .+= state.∇f_temp 
     end
-    state.res_zbar, gz = prox(iter.g, state.av, state.hat_γ)
-    envVal += gz 
+    state.res_zbar, gz = prox(iter.g, state.av, state.hat_γ) # res_zbar = vbar
+    envVal += gz # build by (1.1) - last part
     # state.count += 1
 
     state.res_zbar .-= state.zbar # \bar v- \bar z 
 
-    if state.zbar_prev !== nothing # for lbfgs
+    if state.zbar_prev !== nothing
         # update metric ##### bug prone  v = -res not res
-        update!(state.H, state.zbar - state.zbar_prev, -state.res_zbar +  state.res_zbar_prev) 
+        update!(state.H, state.zbar - state.zbar_prev, -state.res_zbar +  state.res_zbar_prev) # to update H by lbfgs! (H, s-s_pre, y-y_pre)
         # store vectors for next update
         copyto!(state.zbar_prev, state.zbar)
         copyto!(state.res_zbar_prev, state.res_zbar)
     end
 
-    mul!(state.dir, state.H, state.res_zbar)
+    # println(state.res_zbar)
+
+    mul!(state.dir, state.H, state.res_zbar) # update d
 
 
     envVal += real(dot(state.∇f_sum, state.res_zbar)) / iter.N
@@ -145,9 +142,10 @@ function Base.iterate(
     # state.dir .=  state.res_zbar # sanity check   
 
     # println("envelope(bar z) outside is $(envVal)")
-    state.τ = 1.0
+    state.τ = 0.0
     # while true  ######## z_line should be removed using some other placeholder
-    for i=1:5
+    # linesearch
+    for i=1:5 #? 5 reductions with factor of 50? why?
         state.z_trial .=  state.zbar .+ (1- state.τ) .* state.res_zbar + state.τ * state.dir
 
         # compute varphi(z_trial) 
@@ -168,43 +166,34 @@ function Base.iterate(
         envVal_trial += real(dot(state.∇f_sum, state.z)) / iter.N
         envVal_trial += norm(state.z)^2 / (2 *  state.hat_γ)
 
-        envVal_trial <= envVal + eps(R) && break
+        envVal_trial <= envVal + eps(R) && break # envVal: envelope value
+        println("should not be here!!")
         # println("ls backtracked, tau was $(state.τ)")
         state.τ /= 50       ##### bug prone: change in reporting if you change this! ######
     end
     state.zbar .= state.z_trial # of line search
 
-    ###### at the momoent I am computing the next prox twice (it is already computed in the ls) 
-    iter.sweeping == 3 && (state.inds = randperm(state.d)) # shuffled
+    ###### at the momoent I am computing the next prox twice (it is already computed in the ls (linesearch)) 
+    iter.sweeping == 3 && (state.inds = randperm(state.d)) # shuffled (only shuffeling the barch indices not the indices inside of each batch)
+    prox!(state.z, iter.g, state.av, state.hat_γ) # state.av is already calculated for envVal
 
-    # println("rep is $(iter.rep)")
-    Ind = Index_iterable(1, iter.inseq, iter.rep, iter.N) # in CIAO utilities
-
-    for (it, ind) in Iterators.enumerate(Ind) # here we don't have batches
-        # println(it)
-        if mod(it, iter.inseq * iter.rep) == 1
-            # println("------new cycle starts-----")
-            for ell in 1:(iter.inseq+1)       # for initializing the inner loop
-                copyto!(state.z_M[ell], state.zbar) # resetting with zbar: x^full
-            end             
-        end
-        println(ind) 
-        prox!(state.z_M[ind.m_n], iter.g, state.av, state.hat_γ) # always m_o is 1 larger than m_n
-                
-        gradient!(state.∇f_temp, iter.F[state.inds[ind.i]], state.z_M[ind.m_o]) # update the gradient - ind.i counts 123123123456...
-        state.av .+= (state.hat_γ / iter.N) .* state.∇f_temp
-        gradient!(state.∇f_temp, iter.F[state.inds[ind.i]], state.z_M[ind.m_n]) # update the gradient
-        state.av .-= (state.hat_γ / iter.N) .* state.∇f_temp
-        state.av .+= (state.hat_γ / state.γ[state.inds[ind.i]]) .* (state.z_M[ind.m_n] .- state.z_M[ind.m_o])
-    end 
-
+    # for j in state.inds # batch indices
+    #     prox!(state.z, iter.g, state.av, state.hat_γ) # state.av is already calculated for envVal
+    #     for i in state.ind[j] # in Algorithm 1 line 9, batchsize is 1, but we here we are more general - state.ind: indices in the j th batch
+    #         gradient!(state.∇f_temp, iter.F[i], state.zbar) # update the gradient
+    #         state.av .+= (state.hat_γ / iter.N) .* state.∇f_temp
+    #         gradient!(state.∇f_temp, iter.F[i], state.z) # update the gradient
+    #         state.av .-= (state.hat_γ / iter.N) .* state.∇f_temp
+    #         state.av .+= (state.hat_γ / state.γ[i]) .* (state.z .- state.zbar)
+    #     end
+    # end
+    # state.count += 1
     return state, state
 end
 
-solution(state::FINITO_DFlbfgs_state) = state.z_M[end]
-epoch_count(state::FINITO_DFlbfgs_state) = state.τ   # number of epochs is 2+ 1/tau , where 1/tau is from ls 
+solution(state::FINITO_lbfgs_state) = state.z
+epoch_count(state::FINITO_lbfgs_state) = state.τ   # number of epochs is 2+ 1/tau , where 1/tau is from ls (linesearch)
 
 
-
-
-###### there is some bug when rep inseq =(1,1) it is not working......check after adding adaptive stepsizes!!!!
+###TODO: 
+    # add LS parameter as iter field
