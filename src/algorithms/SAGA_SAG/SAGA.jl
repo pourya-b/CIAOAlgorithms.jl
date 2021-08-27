@@ -20,6 +20,7 @@ using Random
 export solution
 
 include("SAGA_basic.jl")
+include("SAGA_prox.jl")
 
 struct SAGA{R<:Real}
     γ::Maybe{R}
@@ -27,12 +28,14 @@ struct SAGA{R<:Real}
     verbose::Bool
     freq::Int
     SAG_flag::Bool
+    prox_flag::Bool
     function SAGA{R}(;
         γ::Maybe{R} = nothing,
         maxit::Int = 10000,
         verbose::Bool = false,
         freq::Int = 1000,
         SAG_flag::Bool = false,
+        prox_flag::Bool = false,
     ) where {R}
         @assert γ === nothing || γ > 0
         @assert maxit > 0
@@ -55,7 +58,12 @@ function (solver::SAGA{R})(
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
 
     # dispatching the structure
-    iter = SAGA_basic_iterable(F, g, x0, N, L, solver.γ, solver.SAG_flag)
+    if solver.prox_flag
+        iter = SAGA_prox_iterable(F, g, x0, N, L, solver.γ, solver.SAG_flag)
+    else
+        iter = SAGA_basic_iterable(F, g, x0, N, L, solver.γ, solver.SAG_flag)
+    end
+
     iter = take(halt(iter, stop), solver.maxit)
     iter = enumerate(iter)
     num_iters, state_final = nothing, nothing
@@ -136,8 +144,14 @@ function iterator(
 
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
-    iter = SAGA_basic_iterable(F, g, x0, N, L, solver.γ, solver.SAG_flag)
-
+    if solver.prox_flag
+        println("prox version")
+        iter = SAGA_prox_iterable(F, g, x0, N, L, solver.γ, solver.SAG_flag)
+    else
+        println("ohhhh")
+        println(solver.prox_flag)
+        iter = SAGA_prox_iterable(F, g, x0, N, L, solver.γ, solver.SAG_flag)
+    end
     return iter
 end
 

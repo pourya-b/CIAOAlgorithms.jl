@@ -1,10 +1,10 @@
 struct FINITO_LFinito_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg} <: CIAO_iterable
-    F::Array{Tf}            # smooth term  
-    g::Tg                   # nonsmooth term 
+    F::Array{Tf}            # smooth term
+    g::Tg                   # nonsmooth term
     x0::Tx                  # initial point
-    N::Int                    # of data points in the finite sum problem 
-    L::Maybe{Union{Array{R},R}}  # Lipschitz moduli of nabla f_i    
-    γ::Maybe{Union{Array{R},R}}  # stepsizes 
+    N::Int                    # of data points in the finite sum problem
+    L::Maybe{Union{Array{R},R}}  # Lipschitz moduli of nabla f_i
+    γ::Maybe{Union{Array{R},R}}  # stepsizes
     sweeping::Int8             # to only use one stepsize γ
     batch::Int                # batch size
     α::R                    # in (0, 1), e.g.: 0.99
@@ -12,15 +12,15 @@ end
 
 mutable struct FINITO_LFinito_state{R<:Real,Tx}
     γ::Array{R}             # stepsize parameter
-    hat_γ::R                # average γ 
+    hat_γ::R                # average γ
     av::Tx                  # the running average
     ind::Array{Array{Int}}  # running index set
-    d::Int                  # number of batches 
-    # some extra placeholders 
+    d::Int                  # number of batches
+    # some extra placeholders
     z::Tx
-    ∇f_temp::Tx             # placeholder for gradients 
+    ∇f_temp::Tx             # placeholder for gradients
     z_full::Tx
-    inds::Array{Int}        # needed for shuffled only! 
+    inds::Array{Int}        # needed for shuffled only!
 end
 
 function FINITO_LFinito_state(γ::Array{R}, hat_γ::R, av::Tx, ind, d) where {R,Tx}
@@ -37,17 +37,17 @@ function FINITO_LFinito_state(γ::Array{R}, hat_γ::R, av::Tx, ind, d) where {R,
     )
 end
 
-function Base.iterate(iter::FINITO_LFinito_iterable{R}) where {R}
+function Base.iterate(iter::FINITO_LFinito_iterable{R}) where {R} #? rewriting the Base?
     N = iter.N
-    r = iter.batch # batch size 
-    # create index sets 
+    r = iter.batch # batch size
+    # create index sets
     ind = Vector{Vector{Int}}(undef, 0)
     d = Int(floor(N / r))
     for i = 1:d
         push!(ind, collect(r*(i-1)+1:i*r))
     end
     r * d < N && push!(ind, collect(r*d+1:N))
-    # updating the stepsize 
+    # updating the stepsize
     if iter.γ === nothing
         if iter.L === nothing
             @warn "--> smoothness parameter absent"
@@ -61,9 +61,15 @@ function Base.iterate(iter::FINITO_LFinito_iterable{R}) where {R}
         end
     else
         isa(iter.γ, R) ? (γ = fill(iter.γ, (N,))) : (γ = iter.γ) # provided γ
+        # γ = iter.γ
+        println("size of the step size:", size(γ))
     end
-    #initializing the vectors 
+    #initializing the vectors
     hat_γ = 1 / sum(1 ./ γ)
+    println("size of the step size:", size(γ))
+    println("size of the step hat size:", size(hat_γ))
+    println("value of the step hat size:", (hat_γ))
+    # hat_γ = γ
     av = copy(iter.x0)
     for i = 1:N
         ∇f, ~ = gradient(iter.F[i], iter.x0)
@@ -79,7 +85,7 @@ function Base.iterate(
     iter::FINITO_LFinito_iterable{R},
     state::FINITO_LFinito_state{R},
 ) where {R}
-    # full update 
+    # full update
     prox!(state.z_full, iter.g, state.av, state.hat_γ)
     state.av .= state.z_full
     for i = 1:iter.N
@@ -97,19 +103,20 @@ function Base.iterate(
             gradient!(state.∇f_temp, iter.F[i], state.z) # update the gradient
             state.av .-= (state.hat_γ / iter.N) .* state.∇f_temp
             state.av .+= (state.hat_γ / state.γ[i]) .* (state.z .- state.z_full)
+            # state.av .+= (state.z .- state.z_full)
         end
     end
-    
+
     return state, state
 end
 
-# function solution(state::FINITO_LFinito_state) 
+# function solution(state::FINITO_LFinito_state)
 #     sol = copy(state.z_full)
 #     prox!(sol, iter.g, state.av, state.hat_γ)
 #     return sol
-# end 
+# end
 
 
-solution(state::FINITO_LFinito_state) = state.z
+solution(state::FINITO_LFinito_state) = state.z # the function solution (one of its methods)
 
 # count(state::FINITO_LFinito_state) = []
