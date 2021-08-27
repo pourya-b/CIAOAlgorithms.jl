@@ -59,7 +59,7 @@ struct Finito{R<:Real}
         sweeping = 1,
         LFinito::Bool = false,
         lbfgs::Bool = false,
-        memory::Int = 5,
+        memory::Int = 6, # lbfgs memory
         adaptive::Bool = false,
         # DeepLFinito::Tuple{Bool,Int} = (false, 3),
         DeepLFinito::Tuple{Bool,Int, Int} = (false, 3, 3),
@@ -81,7 +81,7 @@ struct Finito{R<:Real}
     end
 end
 
-function (solver::Finito{R})( #? we can break the arguments? how it is called?
+function (solver::Finito{R})( # this is a function definition. if solver = Finito(; kwargs...), and then solver(x0;kwargs...) is called, this function will be executed.
     x0::AbstractArray{C};
     F = nothing,
     g = ProximalOperators.Zero(),

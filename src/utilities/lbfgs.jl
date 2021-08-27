@@ -1,15 +1,15 @@
 using LinearAlgebra
 
 mutable struct LBFGS{R<:Real,C<:Union{R,Complex{R}},I<:Integer,T<:AbstractArray{C},M}
-    currmem::I
-    curridx::I
+    currmem::I # how many inputs are in the memory
+    curridx::I # the index of the newest input in the memory
     s::T
     y::T
     s_M::Vector{T}
     y_M::Vector{T}
-    ys_M::Vector{R}
+    ys_M::Vector{R} # vector of <s,y> s
     alphas::Vector{R}
-    H::R
+    H::R # H0 in the algorithm 8 of L04_Newton lecture notes
 end
 
 function LBFGS(
@@ -42,7 +42,7 @@ function update!(L::LBFGS{R,C,I,T,M}, s, y) where {R,C,I,T,M}
         copyto!(L.s_M[L.curridx], L.s)
         copyto!(L.y_M[L.curridx], L.y)
         yty = real(dot(L.y, L.y))
-        L.H = ys / yty
+        L.H = ys / yty # initilization of H0 with matrix ys/yty I
     end
     return L
 end

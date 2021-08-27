@@ -77,12 +77,12 @@ function Base.iterate(iter::SVRG_basic_iterable{R}, state::SVRG_basic_state{R}) 
         state.temp .-= state.av
         state.temp .*= state.γ
         state.temp .+= state.w
-        prox!(state.w, iter.g, state.temp, state.γ)
+        CIAOAlgorithms.prox!(state.w, iter.g, state.temp, state.γ)
         state.z .+= state.w   # keeping track of the sum of w's
     end
     # full update 	
-    state.z_full .= state.z ./ state.m
-    iter.plus || (state.w .= state.z_full) # only for basic SVRG
+    state.z_full .= state.w #state.z ./ state.m
+    # iter.plus || (state.w .= state.z_full) # only for basic SVRG
     state.z = zero(state.z)  # for next iterate 
     state.av .= state.z
     for i = 1:iter.N
@@ -90,7 +90,7 @@ function Base.iterate(iter::SVRG_basic_iterable{R}, state::SVRG_basic_state{R}) 
         state.∇f_temp ./= iter.N
         state.av .+= state.∇f_temp
     end
-    iter.plus && (state.m *= 2) # only for SVRG++
+    # iter.plus && (state.m *= 2) # only for SVRG++
 
     return state, state
 end

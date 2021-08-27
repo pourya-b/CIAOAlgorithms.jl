@@ -8,18 +8,18 @@ using Base.Iterators
 struct Index_iterable{I<:Int}
   x0::I     # initial point of the sequence 
   m::I      # length of the sequence 
-  d::I      # number of repetitions of each sequence ex) 123123123456... has d = 3
-  N::I
+  d::I      # number of repetitions of each sequence ex) 123123456... has d = 2
+  N::I      # max of index
 end
 
 
 mutable struct Index_state{I<:Int}
-  i::I
-  m_n::I
-  m_o::I
+  i::I      # current index: ex: 123123123456...
+  m_n::I    # memory index behind
+  m_o::I    # memory index front
   m::I      # length of the sequence 
-  cnt::I
-  x0::I
+  cnt::I    # an inner counter
+  x0::I     # an inner index
 end
 
 
