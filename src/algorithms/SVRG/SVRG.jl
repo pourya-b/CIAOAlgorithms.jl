@@ -16,10 +16,12 @@ using ProximalAlgorithms.IterationTools
 using Printf
 using Base.Iterators
 using Random
+using Flux
 
 export solution
 
 include("SVRG_basic.jl")
+include("SVRG_basic_DNN.jl")
 
 struct SVRG{R<:Real}
     γ::Maybe{R}
@@ -28,6 +30,7 @@ struct SVRG{R<:Real}
     freq::Int
     m::Maybe{Int}
     plus::Bool
+    DNN::Bool
     function SVRG{R}(;
         γ::Maybe{R} = nothing,
         maxit::Int = 10000,
@@ -35,11 +38,12 @@ struct SVRG{R<:Real}
         freq::Int = 1000,
         m::Maybe{Int} = nothing,
         plus::Bool = false,
+        DNN::Bool = false,
     ) where {R}
         @assert γ === nothing || γ > 0
         @assert maxit > 0
         @assert freq > 0
-        new(γ, maxit, verbose, freq, m, plus)
+        new(γ, maxit, verbose, freq, m, plus, DNN)
     end
 end
 
@@ -141,7 +145,11 @@ function iterator(
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     m = solver.m === nothing ? m = N : m = solver.m
     # dispatching the iterator
-    iter = SVRG_basic_iterable(F, g, x0, N, L, μ, solver.γ, m, solver.plus)
+    if solver.DNN
+        iter = SVRG_basic_DNN_iterable(F, g, x0, N, L, μ, solver.γ, m, solver.plus)
+    else
+        iter = SVRG_basic_iterable(F, g, x0, N, L, μ, solver.γ, m, solver.plus)
+    end
 
     return iter
 end

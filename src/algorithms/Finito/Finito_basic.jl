@@ -115,25 +115,27 @@ function Base.iterate(
     #     state.idxr = state.inds[state.idx]
     # end
 
-    state.idxr = mod(state.idxr,iter.N)+1
-    i = state.idxr
-    gradient!(state.∇f_temp, iter.F[i], state.z)
-    state.∇f_temp .*= -(state.γ[i] / iter.N)
-    state.∇f_temp .+= state.z
-    @. state.av += (state.∇f_temp - state.s[i]) * (state.hat_γ / state.γ[i])
-    state.s[i] .= state.∇f_temp  #update x_i
+    for j = 1:iter.N
+        state.idxr = mod(state.idxr,iter.N)+1
+        i = state.idxr
+        gradient!(state.∇f_temp, iter.F[i], state.z)
+        state.∇f_temp .*= -(state.γ[i] / iter.N)
+        state.∇f_temp .+= state.z
+        @. state.av += (state.∇f_temp - state.s[i]) * (state.hat_γ / state.γ[i])
+        state.s[i] .= state.∇f_temp  #update x_i
 
-    # the iterate
-    # for i in collect(1:iter.N)
-    #     # perform the main steps
-    #     gradient!(state.∇f_temp, iter.F[i], state.z)
-    #     state.∇f_temp .*= -(state.γ[i] / iter.N)
-    #     state.∇f_temp .+= state.z
-    #     @. state.av += (state.∇f_temp - state.s[i]) * (state.hat_γ / state.γ[i])
-    #     state.s[i] .= state.∇f_temp  #update x_i
-    # end
+        # the iterate
+        # for i in collect(1:iter.N)
+        #     # perform the main steps
+        #     gradient!(state.∇f_temp, iter.F[i], state.z)
+        #     state.∇f_temp .*= -(state.γ[i] / iter.N)
+        #     state.∇f_temp .+= state.z
+        #     @. state.av += (state.∇f_temp - state.s[i]) * (state.hat_γ / state.γ[i])
+        #     state.s[i] .= state.∇f_temp  #update x_i
+        # end
 
-    prox!(state.z, iter.g, state.av, state.hat_γ)
+        prox!(state.z, iter.g, state.av, state.hat_γ)
+    end
 
     return state, state
 end

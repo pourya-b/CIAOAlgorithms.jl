@@ -22,7 +22,10 @@ using Printf
 using Base.Iterators # to use take and enumerate functions
 using Random
 using StatsBase: sample
+# using BregmanBC
+using Flux
 
+import ProximalOperators: prox!, prox
 export solution, epoch_count
 
 
@@ -36,6 +39,7 @@ include("Finito_LFinito_lbfgs.jl")
 include("Finito_DLFinito.jl")
 include("Finito_DLFinito_lbfgs.jl")
 include("Finito_LFinito_lbfgs_adaptive.jl")
+include("Finito_LFinito_lbfgs_adaptive_DNN.jl")
 
 
 
@@ -45,6 +49,8 @@ struct Finito{R<:Real}
     LFinito::Bool
     lbfgs::Bool
     memory::Int
+    η::R
+    β::R
     adaptive::Bool
     DeepLFinito::Tuple{Bool,Int, Int}
     minibatch::Tuple{Bool,Int}
@@ -54,12 +60,15 @@ struct Finito{R<:Real}
     α::R
     tol::R
     tol_b::R
+    DNN_training::Bool
     function Finito{R}(;
         γ::Maybe{Union{Array{R},R}} = nothing,
         sweeping = 1,
         LFinito::Bool = false,
         lbfgs::Bool = false,
         memory::Int = 6, # lbfgs memory
+        η::R = 0.7,
+        β::R = 1/50,
         adaptive::Bool = false,
         # DeepLFinito::Tuple{Bool,Int} = (false, 3),
         DeepLFinito::Tuple{Bool,Int, Int} = (false, 3, 3),
@@ -70,6 +79,7 @@ struct Finito{R<:Real}
         α::R = R(0.999), # R is type
         tol::R = R(1e-8),
         tol_b::R = R(1e-9),
+        DNN_training::Bool = false,
     ) where {R}
         @assert γ === nothing || minimum(γ) > 0
         @assert maxit > 0
@@ -77,7 +87,7 @@ struct Finito{R<:Real}
         @assert tol > 0
         @assert tol_b > 0
         @assert freq > 0
-        new(γ, sweeping, LFinito, lbfgs, memory, adaptive, DeepLFinito, minibatch, maxit, verbose, freq, α, tol, tol_b)
+        new(γ, sweeping, LFinito, lbfgs, memory, η, β, adaptive, DeepLFinito, minibatch, maxit, verbose, freq, α, tol, tol_b, DNN_training)
     end
 end
 
@@ -147,6 +157,8 @@ function (solver::Finito{R})( # this is a function definition. if solver = Finit
                 N,
                 L,
                 solver.γ,
+                solver.η,
+                solver.β,
                 solver.sweeping,
                 solver.minibatch[2],
                 solver.α,
@@ -161,6 +173,7 @@ function (solver::Finito{R})( # this is a function definition. if solver = Finit
                 N,
                 L,
                 solver.γ,
+                solver.β,
                 solver.sweeping,
                 solver.minibatch[2],
                 solver.α,
@@ -264,15 +277,40 @@ and https://docs.julialang.org/en/v1/base/iterators/ for a list of iteration uti
 
 function iterator( #? how it is called?
     solver::Finito{R},
-    x0::AbstractArray{C};
+    x0::Union{AbstractArray{C},Tp};
     F = nothing,
     g = ProximalOperators.Zero(),
     L = nothing,
     N = N,
-) where {R,C<:RealOrComplex{R}}
+    S = nothing,
+    F_full = nothing,
+    data = nothing,
+    DNN_config::Tdnn
+) where {R,C<:RealOrComplex{R},Tp,Tdnn}
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
-    if solver.LFinito
+    w0 = DNN_config()
+    if solver.DNN_training
+        iter = FINITO_lbfgs_adaptive_DNN_iterable(
+            F,
+            F_full,
+            g,
+            x0,
+            N,
+            L,
+            solver.γ,
+            solver.η,
+            solver.β,
+            solver.sweeping,
+            solver.minibatch[2],
+            solver.α,
+            LBFGS(w0, solver.memory),
+            solver.adaptive,
+            solver.tol_b,
+            data,
+            DNN_config
+        )
+    elseif solver.LFinito
         if solver.DeepLFinito[1]
             iter = FINITO_DLFinito_iterable(
                 F,
@@ -324,12 +362,15 @@ function iterator( #? how it is called?
                 N,
                 L,
                 solver.γ,
+                solver.η,
+                solver.β,
                 solver.sweeping,
                 solver.minibatch[2],
                 solver.α,
                 LBFGS(x0, solver.memory),
                 solver.adaptive,
                 solver.tol_b,
+                S,
             )
         else
             iter = FINITO_lbfgs_iterable(
@@ -339,6 +380,7 @@ function iterator( #? how it is called?
                 N,
                 L,
                 solver.γ,
+                solver.β,
                 solver.sweeping,
                 solver.minibatch[2],
                 solver.α,

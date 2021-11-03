@@ -5,8 +5,9 @@ struct FINITO_lbfgs_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf
     N::Int                    # of data points in the finite sum problem 
     L::Maybe{Union{Array{R},R}}  # Lipschitz moduli of nabla f_i    
     γ::Maybe{Union{Array{R},R}}  # stepsizes 
-    sweeping::Int8             # to only use one stepsize γ
-    batch::Int                # batch size
+    β::R                    # ls division parameter for τ
+    sweeping::Int8          # to only use one stepsize γ
+    batch::Int              # batch size
     α::R                    # in (0, 1), e.g.: 0.99
     H::TH                   # LBFGS struct
 end
@@ -166,9 +167,11 @@ function Base.iterate(
         envVal_trial += real(dot(state.∇f_sum, state.z)) / iter.N
         envVal_trial += norm(state.z)^2 / (2 *  state.hat_γ)
 
-        envVal_trial <= envVal + eps(R) && break # envVal: envelope value
+        
+        tol = 10^(-6) * abs(envVal)
+        envVal_trial <= envVal + tol && break # envVal: envelope value
         # println("ls backtracked, tau was $(state.τ)")
-        state.τ /= 1000       ##### bug prone: change in reporting if you change this! ######
+        state.τ *= iter.β    ##### bug prone: change in reporting if you change this! ######
     end
     state.zbar .= state.z_trial # of line search
 

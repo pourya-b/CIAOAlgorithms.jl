@@ -7,11 +7,13 @@ using ProximalAlgorithms.IterationTools
 using Printf
 using Base.Iterators
 using Random
+using Flux
 
 export solution
 
 include("SARAH_basic.jl") #? what are Array and AbstractArray?
 include("SARAH_prox.jl")
+include("SARAH_prox_DNN.jl")
 
 struct SARAH{R<:Real}
     γ::Maybe{R}
@@ -20,6 +22,7 @@ struct SARAH{R<:Real}
     freq::Int
     m::Maybe{Int}
     ꞵ::Maybe{R}
+    DNN::Bool
     function SARAH{R}(;
         γ::Maybe{R} = nothing,
         maxit::Int = 10000,
@@ -27,11 +30,12 @@ struct SARAH{R<:Real}
         freq::Int = 1000,
         m::Maybe{Int} = nothing, # number of inner loop updates
         ꞵ::Maybe{R} = nothing,
+        DNN::Bool = false,
     ) where {R}
         @assert γ === nothing || γ > 0
         @assert maxit > 0
         @assert freq > 0
-        new(γ, maxit, verbose, freq, m, ꞵ)
+        new(γ, maxit, verbose, freq, m, ꞵ, DNN)
     end
 end
 
@@ -123,13 +127,15 @@ and https://docs.julialang.org/en/v1/base/iterators/ for a list of iteration uti
 
 function iterator(
     solver::SARAH{R},
-    x0::AbstractArray{C};
+    x0::Union{AbstractArray{C},Tp};
     F = nothing,
     g = ProximalOperators.Zero(),
     L = nothing,
     μ = nothing,
     N = nothing,
-) where {R,C<:RealOrComplex{R}}
+    data = nothing,
+    DNN_config = Tdnn
+) where {R,C<:RealOrComplex{R},Tdnn,Tp}
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     m = solver.m === nothing ? m = N : m = solver.m
 
@@ -138,8 +144,13 @@ function iterator(
         println("basic version")
         iter = SARAH_basic_iterable(F, x0, N, L, μ, solver.γ, m)
     else
-        println("prox version")
-        iter = SARAH_prox_iterable(F, g, x0, N, L, μ, solver.γ, m, solver.ꞵ)
+        if solver.DNN
+            println("DNN version")
+            iter = SARAH_prox_DNN_iterable(F, g, x0, N, L, μ, solver.γ, m, solver.ꞵ, data, DNN_config)
+        else
+            println("prox version")
+            iter = SARAH_prox_iterable(F, g, x0, N, L, μ, solver.γ, m, solver.ꞵ)
+        end
     end
 
     return iter

@@ -1,16 +1,18 @@
-struct SARAH_prox_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg}
-    F::Array{Tf}            # smooth term - array of f_i s 
+struct SARAH_prox_DNN_iterable{R<:Real,Tf,Tg,Tp}
+    F::Union{Array{Tf},Tf}            # smooth term - array of f_i s 
     g::Tg                   # nonsmooth part
-    x0::Tx                  # initial point
+    opt_params::Tp                  # initial point
     N::Int                  # of data points in the finite sum problem 
     L::Maybe{Union{Array{R},R}}  # Lipschitz moduli of ∇f_i	
     μ::Maybe{Union{Array{R},R}}  # convexity moduli of the gradients
     γ::Maybe{R}             # stepsize (a single scalar)
     m::Maybe{Int}           # number of inner loop updates
     ꞵ::Maybe{R}             # a scalar momentum 
+    data::Tuple
+    DNN_config!
 end
 
-mutable struct SARAH_prox_state{R<:Real,Tx}
+mutable struct SARAH_prox_DNN_state{R<:Real,Tx}
     γ::R                    # stepsize 
     m::Maybe{Int}           # number of inner loop updates
     ꞵ::R                    # momentum 
@@ -24,11 +26,14 @@ mutable struct SARAH_prox_state{R<:Real,Tx}
     temp::Tx                # placeholder for gradients 
 end
 
-function SARAH_prox_state(γ::R, m, ꞵ::R, av::Tx, w::Tx, w_plus::Tx, ind) where {R,Tx}
-    return SARAH_prox_state{R,Tx}(γ, m, ꞵ, av, w, w_plus, ind, copy(av), copy(av))
+function SARAH_prox_DNN_state(γ::R, m, ꞵ::R, av::Tx, w::Tx, w_plus::Tx, ind) where {R,Tx}
+    return SARAH_prox_DNN_state{R,Tx}(γ, m, ꞵ, av, w, w_plus, ind, copy(av), copy(av))
 end
 
-function Base.iterate(iter::SARAH_prox_iterable{R}) where {R} 
+batchmemaybe(x) = tuple(x)
+batchmemaybe(x::Tuple) = x
+
+function Base.iterate(iter::SARAH_prox_DNN_iterable{R}) where {R} 
     N = iter.N
     m = iter.m
     batch = 1
@@ -54,27 +59,49 @@ function Base.iterate(iter::SARAH_prox_iterable{R}) where {R}
     end
 
     # initializing the vectors 
-    av = zero(iter.x0) 
-    w_plus = zero(iter.x0)
-    for i = 1:N
-        ∇f, ~ = gradient(iter.F[i], iter.x0) 
-        ∇f ./= N
-        av .+= ∇f 
+    x0 = iter.DNN_config!()
+    # av = zero(x0) 
+    w_plus = zero(x0)
+    # for i = 1:N
+    #     ∇f = (Flux.gradient(() -> iter.F(i,iter.x0), params(iter.x0)))[iter.x0][:,1]
+    #     # ∇f, ~ = gradient(iter.F[i], iter.x0) 
+    #     ∇f ./= N
+    #     av .+= ∇f 
+    # end
+    gs = Flux.gradient(iter.opt_params) do # sampled gradient
+        iter.F(batchmemaybe(iter.data)...)
     end
-    w = copy(iter.x0)
+    av = iter.DNN_config!(gs=gs)
+    w = copy(x0)
     CIAOAlgorithms.prox!(w_plus, iter.g, w - γ * av, γ)
     w_plus .*= ꞵ
     w_plus .+= (1 - ꞵ) * w
 
-    state = SARAH_prox_state(γ, m, ꞵ, av, w, w_plus, ind)
+    state = SARAH_prox_DNN_state(γ, m, ꞵ, av, w, w_plus, ind)
     return state, state
 end
 
-function Base.iterate(iter::SARAH_prox_iterable{R}, state::SARAH_prox_state{R}) where {R}
+function Base.iterate(iter::SARAH_prox_DNN_iterable{R}, state::SARAH_prox_DNN_state{R}) where {R}
     # The inner cycle
     for i in rand(state.ind, state.m)
-        gradient!(state.temp, iter.F[i], state.w_plus) 
-        gradient!(state.∇f_temp, iter.F[i], state.w)
+        temp_x = iter.data[1][:,i]
+        temp_y = iter.data[2][:,i]
+        # gradient!(state.temp, iter.F[i], state.w_plus) 
+        # state.temp .= (Flux.gradient(() -> iter.F(i,state.w_plus), params(state.w_plus)))[state.w_plus][:,1]
+        iter.DNN_config!(gs=state.w_plus)
+        gs = Flux.gradient(iter.opt_params) do # sampled gradient
+            iter.F(temp_x,temp_y)
+        end
+        state.temp .= iter.DNN_config!(gs=gs)
+
+        # gradient!(state.∇f_temp, iter.F[i], state.w)
+        # state.∇f_temp .= (Flux.gradient(() -> iter.F(i,state.w), params(state.w)))[state.w][:,1]
+        iter.DNN_config!(gs=state.w)
+        gs = Flux.gradient(iter.opt_params) do # sampled gradient
+            iter.F(temp_x,temp_y)
+        end
+        state.∇f_temp .= iter.DNN_config!(gs=gs)
+
         state.av .+= state.temp
         state.av .-= state.∇f_temp
 
@@ -91,12 +118,19 @@ function Base.iterate(iter::SARAH_prox_iterable{R}, state::SARAH_prox_state{R}) 
     end
     # full update 	
     state.w .= state.w_plus
-    state.av .= zero(state.w)  # for next iterate 
-    for i = 1:iter.N
-        gradient!(state.∇f_temp, iter.F[i], state.w)
-        state.∇f_temp ./= iter.N
-        state.av .+= state.∇f_temp
+    # state.av .= zero(state.w)  # for next iterate 
+    # for i = 1:iter.N
+    #     # gradient!(state.∇f_temp, iter.F[i], state.w)
+    #     state.∇f_temp .= (Flux.gradient(() -> iter.F(i,state.w), params(state.w)))[state.w][:,1]
+    #     state.∇f_temp ./= iter.N
+    #     state.av .+= state.∇f_temp
+    # end
+    iter.DNN_config!(gs=state.w)
+    gs = Flux.gradient(iter.opt_params) do # sampled gradient
+        iter.F(batchmemaybe(iter.data)...)
     end
+    state.av .= iter.DNN_config!(gs=gs)
+    
     state.temp .= state.av
     state.temp .*= state.γ
     state.temp .*= -1
@@ -110,4 +144,4 @@ function Base.iterate(iter::SARAH_prox_iterable{R}, state::SARAH_prox_state{R}) 
     return state, state
 end
 
-solution(state::SARAH_prox_state) = state.w_plus
+solution(state::SARAH_prox_DNN_state) = state.w_plus

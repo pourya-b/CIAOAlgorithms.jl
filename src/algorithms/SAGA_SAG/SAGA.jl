@@ -148,8 +148,7 @@ function iterator(
         println("prox version")
         iter = SAGA_prox_iterable(F, g, x0, N, L, solver.γ, solver.SAG_flag)
     else
-        println("ohhhh")
-        println(solver.prox_flag)
+        println("basic version")
         iter = SAGA_prox_iterable(F, g, x0, N, L, solver.γ, solver.SAG_flag)
     end
     return iter

@@ -6,28 +6,40 @@ using ProximalAlgorithms.IterationTools
 using Printf
 using Base.Iterators
 using Random
+# using BregmanBC
+using Flux
 
 export solution
 
 include("SGD_prox.jl")
+include("SGD_prox_DNN.jl")
+
 
 struct SGD{R<:Real}
     γ::Maybe{R}
     maxit::Int
     verbose::Bool
     freq::Int
-    plus::Bool
+    plus::Bool # true for diminishing stepsize
+    DNN::Bool
+    η0::Maybe{R}
+    η_tilde::Maybe{R}
     function SGD{R}(;
         γ::Maybe{R} = nothing,
         maxit::Int = 10000,
         verbose::Bool = false,
         freq::Int = 1000,
         plus::Bool = false,
+        DNN::Bool = false,
+        η0::Maybe{R} = 0.1,
+        η_tilde::Maybe{R} = 0.5,
     ) where {R}
         @assert γ === nothing || γ > 0
         @assert maxit > 0
         @assert freq > 0
-        new(γ, maxit, verbose, freq, plus)
+        @assert η0 > 0
+        @assert η_tilde > 0
+        new(γ, maxit, verbose, freq, plus, DNN, η0, η_tilde)
     end
 end
 
@@ -112,15 +124,21 @@ and https://docs.julialang.org/en/v1/base/iterators/ for a list of iteration uti
 
 function iterator(
     solver::SGD{R},
-    x0::AbstractArray{C};
+    x0::Union{AbstractArray{C},Tp};
     F = nothing,
     g = ProximalOperators.Zero(),
     L = nothing,
     μ = nothing,
     N = N,
-) where {R,C<:RealOrComplex{R}}
+    data = nothing,
+    DNN_config::Tdnn
+) where {R,C<:RealOrComplex{R},Tp,Tdnn}
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
-    iter = SGD_prox_iterable(F, g, x0, N, L, μ, solver.γ, solver.plus)
+    if solver.DNN
+        iter = SGD_prox_DNN_iterable(F, g, x0, N, L, μ, solver.γ, solver.plus, solver.η0, solver.η_tilde, data, DNN_config)
+    else
+        iter = SGD_prox_iterable(F, g, x0, N, L, μ, solver.γ, solver.plus, solver.η0, solver.η_tilde)
+    end
     return iter
 end

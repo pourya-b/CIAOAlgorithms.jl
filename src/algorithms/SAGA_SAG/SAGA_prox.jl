@@ -55,21 +55,23 @@ end
 
 function Base.iterate(iter::SAGA_prox_iterable{R}, state::SAGA_prox_state{R}) where {R}
 
-    state.ind = rand(1:iter.N) # one random number (b=1)
-    gradient!(state.∇f_temp, iter.F[state.ind], state.z)
-    gradient!(state.temp, iter.F[state.ind], state.a[state.ind])
+    for i = 1:iter.N # for speed in implementation
+        state.ind = rand(1:iter.N) # one random number (b=1)
+        gradient!(state.∇f_temp, iter.F[state.ind], state.z)
+        gradient!(state.temp, iter.F[state.ind], state.a[state.ind])
 
-    @. state.w = state.z - state.γ * (state.∇f_temp - state.temp + state.av)
+        @. state.w = state.z - state.γ * (state.∇f_temp - state.temp + state.av)
 
-    state.ind = rand(1:iter.N) # one random number (b=1)
-    state.a_old .= state.a[state.ind]
-    state.a[state.ind] .= state.z
-    
-    gradient!(state.∇f_temp, iter.F[state.ind], state.a_old)
-    gradient!(state.temp, iter.F[state.ind], state.a[state.ind])
-    @. state.av -= (state.∇f_temp - state.temp) / iter.N
+        state.ind = rand(1:iter.N) # one random number (b=1)
+        state.a_old .= state.a[state.ind]
+        state.a[state.ind] .= state.z
+        
+        gradient!(state.∇f_temp, iter.F[state.ind], state.a_old)
+        gradient!(state.temp, iter.F[state.ind], state.a[state.ind])
+        @. state.av -= (state.∇f_temp - state.temp) / iter.N
 
-    prox!(state.z, iter.g, state.w, state.γ)
+        prox!(state.z, iter.g, state.w, state.γ)
+    end
 
     return state, state
 end

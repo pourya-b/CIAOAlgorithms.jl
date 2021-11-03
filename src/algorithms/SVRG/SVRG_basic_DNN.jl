@@ -1,5 +1,5 @@
-struct SVRG_basic_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg}
-    F::Array{Tf}            # smooth term  
+struct SVRG_basic_DNN_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg}
+    F::Union{Array{Tf},Tf}            # smooth term  
     g::Tg                   # nonsmooth term 
     x0::Tx                  # initial point
     N::Int                  # of data points in the finite sum problem 
@@ -10,7 +10,7 @@ struct SVRG_basic_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,T
     plus::Bool              # for SVRG++ variant 
 end
 
-mutable struct SVRG_basic_state{R<:Real,Tx}
+mutable struct SVRG_basic_DNN_state{R<:Real,Tx}
     γ::R                    # stepsize 
     m::Int                  # number of inner loop updates
     av::Tx                  # the running average
@@ -23,11 +23,11 @@ mutable struct SVRG_basic_state{R<:Real,Tx}
     temp::Tx
 end
 
-function SVRG_basic_state(γ::R, m, av::Tx, z::Tx, z_full::Tx, w::Tx, ind) where {R,Tx}
-    return SVRG_basic_state{R,Tx}(γ, m, av, z, z_full, w, ind, copy(av), copy(av))
+function SVRG_basic_DNN_state(γ::R, m, av::Tx, z::Tx, z_full::Tx, w::Tx, ind) where {R,Tx}
+    return SVRG_basic_DNN_state{R,Tx}(γ, m, av, z, z_full, w, ind, copy(av), copy(av))
 end
 
-function Base.iterate(iter::SVRG_basic_iterable{R}) where {R}
+function Base.iterate(iter::SVRG_basic_DNN_iterable{R}) where {R}
     N = iter.N
     ind = collect(1:N)
     m = iter.m === nothing ? m = 2 * N : m = iter.m
@@ -57,23 +57,26 @@ function Base.iterate(iter::SVRG_basic_iterable{R}) where {R}
     # initializing the vectors 
     av = zero(iter.x0)
     for i = 1:N
-        ∇f, ~ = gradient(iter.F[i], iter.x0)
+        ∇f = (Flux.gradient(() -> iter.F(i,iter.x0), params(iter.x0)))[iter.x0][:,1]
+        # ∇f, ~ = gradient(iter.F[i], iter.x0)
         ∇f ./= N
         av .+= ∇f
     end
     z_full = copy(iter.x0)
     z = zero(av)
     w = copy(iter.x0)
-    state = SVRG_basic_state(γ, m, av, z, z_full, w, ind)
+    state = SVRG_basic_DNN_state(γ, m, av, z, z_full, w, ind)
     print()
     return state, state
 end
 
-function Base.iterate(iter::SVRG_basic_iterable{R}, state::SVRG_basic_state{R}) where {R}
+function Base.iterate(iter::SVRG_basic_DNN_iterable{R}, state::SVRG_basic_DNN_state{R}) where {R}
     # The inner cycle
     for i in rand(state.ind, state.m)
-        gradient!(state.temp, iter.F[i], state.z_full)
-        gradient!(state.∇f_temp, iter.F[i], state.w)
+        state.temp .= (Flux.gradient(() -> iter.F(i,state.z_full), params(state.z_full)))[state.z_full][:,1]
+        # gradient!(state.temp, iter.F[i], state.z_full)
+        state.∇f_temp .= (Flux.gradient(() -> iter.F(i, state.w), params(state.w)))[state.w][:,1]
+        # gradient!(state.∇f_temp, iter.F[i], state.w)
         state.temp .-= state.∇f_temp
         state.temp .-= state.av
         state.temp .*= state.γ
@@ -87,7 +90,8 @@ function Base.iterate(iter::SVRG_basic_iterable{R}, state::SVRG_basic_state{R}) 
     state.z = zero(state.z)  # for next iterate 
     state.av .= state.z
     for i = 1:iter.N
-        gradient!(state.∇f_temp, iter.F[i], state.z_full)
+        state.∇f_temp .= (Flux.gradient(() -> iter.F(i, state.z_full), params(state.z_full)))[state.z_full][:,1]
+        # gradient!(state.∇f_temp, iter.F[i], state.z_full)
         state.∇f_temp ./= iter.N
         state.av .+= state.∇f_temp
     end
@@ -97,4 +101,4 @@ function Base.iterate(iter::SVRG_basic_iterable{R}, state::SVRG_basic_state{R}) 
 end
 
 
-solution(state::SVRG_basic_state) = state.z_full
+solution(state::SVRG_basic_DNN_state) = state.z_full

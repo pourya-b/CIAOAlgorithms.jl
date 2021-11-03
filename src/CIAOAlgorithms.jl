@@ -7,7 +7,7 @@ const Maybe{T} = Union{T, Nothing}
 include("utilities/indexingUtilities.jl")
 include("utilities/IndexIterator.jl")
 include("utilities/lbfgs.jl")
-include("utilities/indNonnegativeBallL2.jl")
+# include("utilities/indNonnegativeBallL2.jl")
 # algorithms
 include("algorithms/Finito/Finito.jl")
 include("algorithms/ProShI/ProShI.jl")

@@ -62,13 +62,9 @@ function Base.iterate(iter::FINITO_LFinito_iterable{R}) where {R} #? rewriting t
     else
         isa(iter.γ, R) ? (γ = fill(iter.γ, (N,))) : (γ = iter.γ) # provided γ
         # γ = iter.γ
-        println("size of the step size:", size(γ))
     end
     #initializing the vectors
     hat_γ = 1 / sum(1 ./ γ)
-    println("size of the step size:", size(γ))
-    println("size of the step hat size:", size(hat_γ))
-    println("value of the step hat size:", (hat_γ))
     # hat_γ = γ
     av = copy(iter.x0)
     for i = 1:N
