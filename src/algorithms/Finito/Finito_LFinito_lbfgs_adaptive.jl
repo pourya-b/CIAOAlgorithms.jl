@@ -141,6 +141,7 @@ function Base.iterate(iter::FINITO_lbfgs_adaptive_iterable{R}) where {R}
     sum_nrmx = norm(iter.x0)^2 / hat_γ
     sum_z = iter.x0 / hat_γ
     state = FINITO_lbfgs_adaptive_state(γ, hat_γ, av, ind, cld(N, r), iter.H, sum_z, sum_nrmx, sum_nabla, sum_innprod, sum_fx)
+    println("test: $(norm(iter.x0)) - $(hat_γ)")
 
     return state, state
 end
@@ -361,9 +362,9 @@ function Base.iterate(
                 # break
                 R(state.val_fg) <= fi_model + tol && break
                 
-                println("ls 4 γ: $(state.hat_γ) for sample $(i)")
-                println("x: ", state.val_fg)
-                println("y: ", fi_model)
+                # println("ls 4 γ: $(state.hat_γ) for sample $(i)")
+                # println("x: ", state.val_fg)
+                # println("y: ", fi_model)
 
                 hat_γ_prev = state.hat_γ
                 γ_prev = state.γ[i]

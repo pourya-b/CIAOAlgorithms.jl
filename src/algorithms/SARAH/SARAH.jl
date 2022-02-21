@@ -134,7 +134,7 @@ function iterator(
     μ = nothing,
     N = nothing,
     data = nothing,
-    DNN_config = Tdnn
+    DNN_config::Maybe{Tdnn} = nothing
 ) where {R,C<:RealOrComplex{R},Tdnn,Tp}
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     m = solver.m === nothing ? m = N : m = solver.m
