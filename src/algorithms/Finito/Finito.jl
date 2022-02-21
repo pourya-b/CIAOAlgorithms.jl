@@ -22,12 +22,12 @@ using Printf
 using Base.Iterators # to use take and enumerate functions
 using Random
 using StatsBase: sample
-# using BregmanBC
-using Flux
-
-import ProximalOperators: prox!, prox
+using BregmanBC
+# using Flux
+import BregmanBC: gradient, gradient!
+# import ProximalOperators: prox!, prox, gradient, gradient!
 export solution, epoch_count
-
+import ProximalOperators: gradient, gradient!
 
 abstract type CIAO_iterable end #? what is this? where is used?
 
@@ -285,11 +285,11 @@ function iterator( #? how it is called?
     S = nothing,
     F_full = nothing,
     data = nothing,
-    DNN_config::Tdnn
+    DNN_config::Maybe{Tdnn} = nothing
 ) where {R,C<:RealOrComplex{R},Tp,Tdnn}
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
-    w0 = DNN_config()
+    DNN_config == nothing ? w0 = copy(x0) : w0 = DNN_config()
     if solver.DNN_training
         iter = FINITO_lbfgs_adaptive_DNN_iterable(
             F,

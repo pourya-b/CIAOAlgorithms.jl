@@ -8,11 +8,12 @@ using Base.Iterators
 using Random
 # using BregmanBC
 using Flux
-
+import ProximalOperators: gradient
 export solution
 
 include("SGD_prox.jl")
 include("SGD_prox_DNN.jl")
+include("GD_prox_DNN.jl")
 
 
 struct SGD{R<:Real}
@@ -24,6 +25,7 @@ struct SGD{R<:Real}
     DNN::Bool
     η0::Maybe{R}
     η_tilde::Maybe{R}
+    GD::Bool
     function SGD{R}(;
         γ::Maybe{R} = nothing,
         maxit::Int = 10000,
@@ -33,13 +35,14 @@ struct SGD{R<:Real}
         DNN::Bool = false,
         η0::Maybe{R} = 0.1,
         η_tilde::Maybe{R} = 0.5,
+        GD::Bool = false
     ) where {R}
         @assert γ === nothing || γ > 0
         @assert maxit > 0
         @assert freq > 0
         @assert η0 > 0
         @assert η_tilde > 0
-        new(γ, maxit, verbose, freq, plus, DNN, η0, η_tilde)
+        new(γ, maxit, verbose, freq, plus, DNN, η0, η_tilde, GD)
     end
 end
 
@@ -136,8 +139,16 @@ function iterator(
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
     if solver.DNN
-        iter = SGD_prox_DNN_iterable(F, g, x0, N, L, μ, solver.γ, solver.plus, solver.η0, solver.η_tilde, data, DNN_config)
+        L = 1.0
+        if solver.GD
+            println("GD prox version - DNN")
+            iter = GD_prox_DNN_iterable(F, g, x0, N, L, μ, solver.γ, solver.plus, solver.η0, solver.η_tilde, data, DNN_config)
+        else
+            println("SGD prox version - DNN")
+            iter = SGD_prox_DNN_iterable(F, g, x0, N, L, μ, solver.γ, solver.plus, solver.η0, solver.η_tilde, data, DNN_config)
+        end
     else
+        println("SGD prox version")
         iter = SGD_prox_iterable(F, g, x0, N, L, μ, solver.γ, solver.plus, solver.η0, solver.η_tilde)
     end
     return iter

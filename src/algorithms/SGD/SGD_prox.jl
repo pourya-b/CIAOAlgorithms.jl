@@ -7,6 +7,8 @@ struct SGD_prox_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg}
     μ::Maybe{Union{Array{R},R}}  # convexity moduli of the gradients
     γ::Maybe{R}             # stepsize 
     plus::Bool              # plus version (diminishing stepsize)
+    η0 :: R
+    η_tilde :: R
 end
 
 mutable struct SGD_prox_state{R<:Real,Tx}
@@ -26,18 +28,22 @@ end
 function Base.iterate(iter::SGD_prox_iterable{R}) where {R}
     N = iter.N
     ind = collect(1:N)
-    # updating the stepsize 
-    if iter.γ === nothing
-        if iter.L === nothing
-            @warn "smoothness or convexity parameter absent"
-            return nothing
+    # updating the stepsize
+    if ~iter.plus 
+        if iter.γ === nothing
+            if iter.L === nothing
+                @warn "smoothness or convexity parameter absent"
+                return nothing
+            else
+                L_M = maximum(iter.L)
+                γ = 1/ (2*L_M)
+            end
         else
-            L_M = maximum(iter.L)
-            γ = 1/ (2*L_M)
+            γ = iter.γ # provided γ
         end
-    else
-        γ = iter.γ # provided γ
     end
+
+
     if iter.plus
         println("diminishing stepsize version")
     end
@@ -50,7 +56,7 @@ function Base.iterate(iter::SGD_prox_iterable{R}) where {R}
         ∇f, ~ = gradient(iter.F[i], z)
         if iter.plus
             cind += 1
-            γ = 0.1/(1+cind/N)
+            γ = iter.η0/(iter.η_tilde + cind/N)
         end
         ∇f ./= N
         ∇f .*= - γ    
@@ -68,7 +74,7 @@ function Base.iterate(iter::SGD_prox_iterable{R}, state::SGD_prox_state{R}) wher
     for i=1:iter.N # just for speed in implementation
         state.cind += 1
         if iter.plus
-            state.γ = 0.1/(1+state.cind/iter.N)
+            state.γ = iter.η0/(iter.η_tilde + state.cind/iter.N)
         end
 
         gradient!(state.∇f_temp, iter.F[i], state.z)

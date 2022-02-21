@@ -115,7 +115,7 @@ function Base.iterate(iter::FINITO_lbfgs_adaptive_DNN_iterable{R}) where {R}
     end
     sum_nabla = iter.DNN_config!(gs=gs) * N
     sum_fx = iter.F(batchmemaybe(iter.data)...) * N
-    x0 = iter.DNN_config!()
+    x0 = copy(iter.DNN_config!())
     sum_innprod = real(dot(sum_nabla, x0))
 
     # println("size testing ∇f: $(size(∇f))")
@@ -126,7 +126,7 @@ function Base.iterate(iter::FINITO_lbfgs_adaptive_DNN_iterable{R}) where {R}
 
     ##-------- γ initialization type 1-------------
     γ = iter.γ
-    xeps = x0 .+ one(R)
+    # xeps = x0 .+ one(R)
     #    av_eps = zero(x0)
     #    for i in 1:N
     #         # ∇f, ~ = gradient(iter.F[i], xeps)
@@ -134,39 +134,40 @@ function Base.iterate(iter::FINITO_lbfgs_adaptive_DNN_iterable{R}) where {R}
     #         av_eps .+= ∇f[iter.x0]
     #     end
 
-    iter.DNN_config!(gs=xeps)
-    gs = Flux.gradient(iter.opt_params) do # sampled gradient
-        iter.F(batchmemaybe(iter.data)...)
-    end
-    av_eps = iter.DNN_config!(gs=gs) * N
+    # iter.DNN_config!(gs=xeps)
+    # gs = Flux.gradient(iter.opt_params) do # sampled gradient
+    #     iter.F(batchmemaybe(iter.data)...)
+    # end
+    # av_eps = iter.DNN_config!(gs=gs) * N
 
-    nmg = norm(sum_nabla - av_eps)
-    t = 1
-    while nmg < eps(R)  # in case xeps has the same gradient
-        println("initial upper bound for L is too small")
-        xeps = x0 .+ rand(t * [-1, 1], size(x0))
-        # av_eps = zero(x0)
-        # for i in 1:N
-        #     # ∇f, ~ = gradient(iter.F[i], xeps)
-        #     ∇f = Flux.gradient(() -> iter.F(i), params(iter.x0))
-        #     av_eps .+= ∇f[iter.x0]
-        # end
-        iter.DNN_config!(gs=xeps)
-        gs = Flux.gradient(iter.opt_params) do # sampled gradient
-            iter.F(batchmemaybe(iter.data)...)
-        end
-        av_eps = iter.DNN_config!(gs=gs) * N
+    # nmg = norm(sum_nabla - av_eps)
+    # t = 1
+    # while nmg < eps(R)  # in case xeps has the same gradient
+    #     println("initial upper bound for L is too small")
+    #     xeps = x0 .+ rand(t * [-1, 1], size(x0))
+    #     # av_eps = zero(x0)
+    #     # for i in 1:N
+    #     #     # ∇f, ~ = gradient(iter.F[i], xeps)
+    #     #     ∇f = Flux.gradient(() -> iter.F(i), params(iter.x0))
+    #     #     av_eps .+= ∇f[iter.x0]
+    #     # end
+    #     iter.DNN_config!(gs=xeps)
+    #     gs = Flux.gradient(iter.opt_params) do # sampled gradient
+    #         iter.F(batchmemaybe(iter.data)...)
+    #     end
+    #     av_eps = iter.DNN_config!(gs=gs) * N
 
-        # grad_f_xeps, f_xeps = gradient(iter.F[i], xeps)
-        nmg = norm(sum_nabla - av_eps)
-        t *= 2
-    end
+    #     # grad_f_xeps, f_xeps = gradient(iter.F[i], xeps)
+    #     nmg = norm(sum_nabla - av_eps)
+    #     t *= 2
+    # end
     ###### decide how to initialize! 
-    L_int = nmg / (t * sqrt(length(x0)))
-    L_int /= iter.N # to account for 1/N
-    γ = iter.α / (L_int)
+    # L_int = nmg / (t * sqrt(length(x0)))
+    # L_int = 3.0 # no ls 
+    # L_int /= iter.N # to account for 1/N
+    # γ = iter.α / (L_int)
     # γ = iter.S(iter.x0)
-    println("gamma specified by L_int: ", γ); flush(stdout)
+    # println("gamma specified by L_int: ", γ); flush(stdout)
 
     ##-------- γ initialization type 2-------------
     # γ = 5.0
@@ -178,12 +179,15 @@ function Base.iterate(iter::FINITO_lbfgs_adaptive_DNN_iterable{R}) where {R}
     # update the average
     av = copy(sum_nabla) .* (-hat_γ / N)
     av .+= x0
+    # println("gamma: $(γ)"); flush(stdout)
+    println("gamma hat: $(hat_γ)"); flush(stdout)
     println("size testing x0: $(size(x0))"); flush(stdout)
 
     sum_nrmx = norm(x0)^2 / hat_γ
     sum_z = x0 / hat_γ
     state = FINITO_lbfgs_adaptive_DNN_state(γ, hat_γ, av, ind, cld(N, r), iter.H, sum_z, sum_nrmx, sum_nabla, sum_innprod, sum_fx)
 
+    println("test: $(norm(x0)) - $(hat_γ)")
     return state, state
 end
 
@@ -227,7 +231,7 @@ function Base.iterate(
         ls_temp_r *= iter.N * iter.α
 
         tol = 10^(-6)  * (1 + abs(ls_temp_r))
-        # break
+        # break # no ls 
         R(ls_temp_l) <= ls_temp_r + tol && break
         println("ls 1"); flush(stdout)
         # println("x: ", ls_temp_l)
@@ -299,7 +303,7 @@ function Base.iterate(
         f_model_z += state.sum_fv
         tol = 10^(-6)  * (1 + abs(f_model_cnst))
         # tol = eps(R)
-        # break
+        # break # no ls 
         R(f_model_z) <= f_model_cnst + tol && break
         println("ls 2")
         flush(stdout)
@@ -382,7 +386,7 @@ function Base.iterate(
 
             tol = 10^(-6)  * (1 + abs(envVal_trial))
             # tol = eps(R)
-            # break
+            # break # no ls 
             if temp <= envVal_trial + tol
                 # println("ls condition met")
                 break
@@ -464,7 +468,7 @@ function Base.iterate(
                     (0.5 * iter.α * iter.N/ state.γ[i]) * (norm(state.zbar .- state.xbar)^2)
 
                 tol = 10^(-6)  * (1 + abs(fi_model))
-                # break
+                # break # no ls 
                 R(state.val_fg) <= fi_model + tol && break
                 
                 # println("ls 4 γ: $(state.hat_γ) for sample $(i)"); flush(stdout)
