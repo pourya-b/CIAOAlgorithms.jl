@@ -6,74 +6,84 @@ struct SGD_prox_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg}
     L::Maybe{Union{Array{R},R}}  # Lipschitz moduli of nabla f_i	
     μ::Maybe{Union{Array{R},R}}  # convexity moduli of the gradients
     γ::Maybe{R}             # stepsize 
-    plus::Bool              # plus version
+    diminishing::Bool       # diminishing stepsize
+    η0::R                   # for the stepsize: η0/(η_tilde + epoch_counter), if diminishing
+    η_tilde::R              # for the stepsize: η0/(η_tilde + epoch_counter), if diminishing
 end
 
 mutable struct SGD_prox_state{R<:Real,Tx}
     γ::R                    # stepsize 
     z::Tx
-    ind::Array{Int}         # running idx set 
     cind::Int               # current interation index
+    idxr::Int               # current index
     # some extra placeholders 
     ∇f_temp::Tx             # placeholder for gradients 
     temp::Tx
 end
 
-function SGD_prox_state(γ::R, z::Tx, ind) where {R,Tx}
-    return SGD_prox_state{R,Tx}(γ, z, ind, Int(1), copy(z), copy(z))
+function SGD_prox_state(γ::R, z::Tx, cind) where {R,Tx}
+    return SGD_prox_state{R,Tx}(γ, z, cind, Int(0), copy(z), copy(z))
 end
 
 function Base.iterate(iter::SGD_prox_iterable{R}) where {R}
     N = iter.N
     ind = collect(1:N)
-    # updating the stepsize 
-    if iter.γ === nothing
-        if iter.L === nothing
-            @warn "smoothness or convexity parameter absent"
-            return nothing
+    # updating the stepsize
+    if ~iter.diminishing 
+        if iter.γ === nothing
+            if iter.L === nothing
+                @warn "smoothness or convexity parameter absent"
+                return nothing
+            else
+                L_M = maximum(iter.L)
+                γ = 1/(2*L_M)
+            end
         else
-            L_M = maximum(iter.L)
-            γ = 1/ (2*L_M)
+            γ = iter.γ # provided γ
         end
-    else
-        γ = iter.γ # provided γ
     end
-    if iter.plus
-        γ = 0.1/(1+1/N)
-        println("plus version")
+
+    if iter.diminishing
+        println("diminishing stepsize version")
     end
+
     # initializing the vectors 
     ∇f_temp = zero(iter.x0)
-    temp = zero(iter.x0)
+    z = zero(iter.x0)
+    z .= iter.x0
+    cind = 0
     for i = 1:N
-        ∇f, ~ = gradient(iter.F[i], iter.x0)
+        ∇f, ~ = gradient(iter.F[i], z)
+        if iter.diminishing
+            cind += 1
+            γ = iter.η0/(iter.η_tilde + cind/N)
+        end
         ∇f ./= N
-        ∇f_temp .+= ∇f
+        ∇f .*= - γ    
+        ∇f .+= z
+        CIAOAlgorithms.prox!(z, iter.g, ∇f, γ)
     end
-    ∇f_temp .*= - γ
-    ∇f_temp .+= iter.x0
-    CIAOAlgorithms.prox!(temp, iter.g, ∇f_temp, γ)
-    state = SGD_prox_state(γ, temp, ind)
+
+    state = SGD_prox_state(γ, z, cind)
     return state, state
 end
 
-function Base.iterate(iter::SGD_prox_iterable{R}, state::SGD_prox_state{R}) where {R}
+function Base.iterate(iter::SGD_prox_iterable{R}, state::SGD_prox_state{R}) where {R} 
     # The inner cycle
-    state.cind += 1
-    if iter.plus
-        state.γ = 0.1/(1+state.cind/iter.N)
-    end
-    state.temp .= zero(state.z)
-    for i in state.ind
+    for i=1:iter.N # for speed in implementation it is executed for one epoch
+        state.cind += 1
+        if iter.diminishing
+            state.γ = iter.η0/(iter.η_tilde + state.cind/iter.N)
+        end
+
         gradient!(state.∇f_temp, iter.F[i], state.z)
-        state.temp .+= state.∇f_temp
+
+        state.∇f_temp .*= - state.γ
+        state.∇f_temp ./= iter.N 
+        state.∇f_temp .+= state.z
+
+        CIAOAlgorithms.prox!(state.z, iter.g, state.∇f_temp, state.γ)
     end
-
-    state.temp .*= - state.γ
-    state.temp ./= iter.N 
-    state.temp .+= state.z
-
-    CIAOAlgorithms.prox!(state.z, iter.g, state.temp, state.γ)
 
     return state, state
 end

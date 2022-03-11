@@ -24,6 +24,7 @@ include("SAGA_prox.jl")
 
 struct SAGA{R<:Real}
     γ::Maybe{R}
+    μ::Maybe{R}
     maxit::Int
     verbose::Bool
     freq::Int
@@ -31,6 +32,7 @@ struct SAGA{R<:Real}
     prox_flag::Bool
     function SAGA{R}(;
         γ::Maybe{R} = nothing,
+        μ::Maybe{R} = nothing,
         maxit::Int = 10000,
         verbose::Bool = false,
         freq::Int = 1000,
@@ -38,9 +40,10 @@ struct SAGA{R<:Real}
         prox_flag::Bool = false,
     ) where {R}
         @assert γ === nothing || γ > 0
+        @assert μ === nothing || μ >= 0
         @assert maxit > 0
         @assert freq > 0
-        new(γ, maxit, verbose, freq, SAG_flag)
+        new(γ, μ, maxit, verbose, freq, SAG_flag, prox_flag)
     end
 end
 
@@ -59,7 +62,7 @@ function (solver::SAGA{R})(
 
     # dispatching the structure
     if solver.prox_flag
-        iter = SAGA_prox_iterable(F, g, x0, N, L, solver.γ, solver.SAG_flag)
+        iter = SAGA_prox_iterable(F, g, x0, N, L, solver.γ, solver.μ)
     else
         iter = SAGA_basic_iterable(F, g, x0, N, L, solver.γ, solver.SAG_flag)
     end
@@ -101,6 +104,8 @@ Optional keyword arguments are:
 * `maxit::Integer` (default: `10000`), maximum number of iterations to perform.
 * `verbose::Bool` (default: `true`), whether or not to print information during the iterations.
 * `freq::Integer` (default: `100`), frequency of verbosity.
+*  SAG_flag::Bool (default: false), if the solver is SAG
+*  prox_flag::Bool (default: false), if the proximal version is needed
 
 References:
 
@@ -145,12 +150,9 @@ function iterator(
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
     if solver.prox_flag
-        println("prox version")
-        iter = SAGA_prox_iterable(F, g, x0, N, L, solver.γ, solver.SAG_flag)
+        iter = SAGA_prox_iterable(F, g, x0, N, L, solver.γ, solver.μ)
     else
-        println("ohhhh")
-        println(solver.prox_flag)
-        iter = SAGA_prox_iterable(F, g, x0, N, L, solver.γ, solver.SAG_flag)
+        iter = SAGA_basic_iterable(F, g, x0, N, L, solver.γ, solver.SAG_flag)
     end
     return iter
 end
@@ -177,6 +179,8 @@ Optional keyword arguments are:
 * `maxit::Integer` (default: `10000`), maximum number of iterations to perform.
 * `verbose::Bool` (default: `true`), whether or not to print information during the iterations.
 * `freq::Integer` (default: `100`), frequency of verbosity.
+*  SAG_flag::Bool (default: false), if the solver is SAG
+*  prox_flag::Bool (default: false), if the proximal version is needed
 
 References:
 

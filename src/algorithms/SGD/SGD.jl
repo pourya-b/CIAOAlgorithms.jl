@@ -1,33 +1,46 @@
-#
-
 using LinearAlgebra
 using ProximalOperators
 using ProximalAlgorithms.IterationTools
 using Printf
 using Base.Iterators
 using Random
-
+# using BregmanBC
+# using Flux # for training DNN
+import ProximalOperators: gradient
 export solution
 
 include("SGD_prox.jl")
+# include("SGD_prox_DNN.jl")
+# include("GD_prox_DNN.jl")
+
 
 struct SGD{R<:Real}
     γ::Maybe{R}
     maxit::Int
     verbose::Bool
     freq::Int
-    plus::Bool
+    diminishing::Bool  # for diminishing stepsize
+    DNN::Bool
+    η0::Maybe{R}       # for diminishing stepsize
+    η_tilde::Maybe{R}  # for diminishing stepsize
+    GD::Bool
     function SGD{R}(;
         γ::Maybe{R} = nothing,
         maxit::Int = 10000,
         verbose::Bool = false,
         freq::Int = 1000,
-        plus::Bool = false,
+        diminishing::Bool = false,
+        DNN::Bool = false,
+        η0::Maybe{R} = 0.1,
+        η_tilde::Maybe{R} = 0.5,
+        GD::Bool = false
     ) where {R}
         @assert γ === nothing || γ > 0
         @assert maxit > 0
         @assert freq > 0
-        new(γ, maxit, verbose, freq, plus)
+        @assert η0 > 0
+        @assert η_tilde > 0
+        new(γ, maxit, verbose, freq, diminishing, DNN, η0, η_tilde, GD)
     end
 end
 
@@ -40,7 +53,7 @@ function (solver::SGD{R})(
     N = N,
 ) where {R,C<:RealOrComplex{R}}
 
-    stop(state::SVRG_basic_state) = false
+    stop(state::SGD_prox_iterable) = false
     disp(it, state) = @printf "%5d | %.3e  \n" it state.γ
 
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
@@ -87,6 +100,11 @@ Optional keyword arguments are:
 * `maxit::Integer` (default: `10000`), maximum number of iterations to perform.
 * `verbose::Bool` (default: `true`), whether or not to print information during the iterations.
 * `freq::Integer` (default: `100`), frequency of verbosity.
+* `diminishing` (default: `false`), if the stepsize is constant or diminishing
+*  η0 (default: 0.1),  for the stepsize: η0/(η_tilde + epoch_counter)
+*  η_tilde (default: 0.5),  for the stepsize: η0/(η_tilde + epoch_counter)
+*  DNN (default: false), for DNN training
+*  GD (default: false), for GD version
 
 """
 
@@ -112,15 +130,26 @@ and https://docs.julialang.org/en/v1/base/iterators/ for a list of iteration uti
 
 function iterator(
     solver::SGD{R},
-    x0::AbstractArray{C};
+    x0::Union{AbstractArray{C},Tp};
     F = nothing,
     g = ProximalOperators.Zero(),
     L = nothing,
     μ = nothing,
     N = N,
-) where {R,C<:RealOrComplex{R}}
+    data = nothing, # for DNN training
+    DNN_config::Tdnn = nothing,
+) where {R,C<:RealOrComplex{R},Tp,Tdnn}
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
-    iter = SGD_prox_iterable(F, g, x0, N, L, μ, solver.γ, solver.plus)
+    if solver.DNN
+        L = 1.0
+        if solver.GD
+            iter = GD_prox_DNN_iterable(F, g, x0, N, L, μ, solver.γ, solver.diminishing, solver.η0, solver.η_tilde, data, DNN_config)
+        else
+            iter = SGD_prox_DNN_iterable(F, g, x0, N, L, μ, solver.γ, solver.diminishing, solver.η0, solver.η_tilde, data, DNN_config)
+        end
+    else
+        iter = SGD_prox_iterable(F, g, x0, N, L, μ, solver.γ, solver.diminishing, solver.η0, solver.η_tilde)
+    end
     return iter
 end

@@ -68,4 +68,3 @@ function Base.iterate(iter::SAGA_basic_iterable{R}, state::SAGA_basic_state{R}) 
 end
 
 solution(state::SAGA_basic_state) = state.z
-#TODO: minibatch

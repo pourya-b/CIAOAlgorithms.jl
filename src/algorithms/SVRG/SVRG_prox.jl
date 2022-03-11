@@ -1,4 +1,4 @@
-struct SVRG_basic_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg}
+struct SVRG_prox_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg}
     F::Array{Tf}            # smooth term  
     g::Tg                   # nonsmooth term 
     x0::Tx                  # initial point
@@ -7,10 +7,9 @@ struct SVRG_basic_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,T
     μ::Maybe{Union{Array{R},R}}  # convexity moduli of the gradients
     γ::Maybe{R}             # stepsize 
     m::Maybe{Int}           # number of inner loop updates
-    plus::Bool              # for SVRG++ variant 
 end
 
-mutable struct SVRG_basic_state{R<:Real,Tx}
+mutable struct SVRG_prox_state{R<:Real,Tx}
     γ::R                    # stepsize 
     m::Int                  # number of inner loop updates
     av::Tx                  # the running average
@@ -23,32 +22,30 @@ mutable struct SVRG_basic_state{R<:Real,Tx}
     temp::Tx
 end
 
-function SVRG_basic_state(γ::R, m, av::Tx, z::Tx, z_full::Tx, w::Tx, ind) where {R,Tx}
-    return SVRG_basic_state{R,Tx}(γ, m, av, z, z_full, w, ind, copy(av), copy(av))
+function SVRG_prox_state(γ::R, m, av::Tx, z::Tx, z_full::Tx, w::Tx, ind) where {R,Tx}
+    return SVRG_prox_state{R,Tx}(γ, m, av, z, z_full, w, ind, copy(av), copy(av))
 end
 
-function Base.iterate(iter::SVRG_basic_iterable{R}) where {R}
+function Base.iterate(iter::SVRG_prox_iterable{R}) where {R}
     N = iter.N
     ind = collect(1:N)
-    m = iter.m === nothing ? m = 2 * N : m = iter.m
+    m = iter.m === nothing ? m = N : m = iter.m
     # updating the stepsize 
     if iter.γ === nothing
-        if iter.plus
-            @warn "provide a stepsize γ"
+        if iter.L === nothing
+            @warn "smoothness parameter absent"
             return nothing
+        elseif iter.μ === nothing 
+            L_M = maximum(iter.L)
+            γ = 1 / (3 * N * L_M) # according to thm 1 of "Proximal Stochastic Methods for Nonsmooth Nonconvex Finite-Sum Optimization", for batch size = 1
         else
-            if iter.L === nothing || iter.μ === nothing
-                @warn "smoothness or convexity parameter absent"
+            L_M = maximum(iter.L)
+            μ_M = maximum(iter.μ)
+            γ = 0.99 / (4 * L_M) # according to thm 3.1 of "A PROXIMAL STOCHASTIC GRADIENT METHOD WITH PROGRESSIVE VARIANCE REDUCTION" 
+            rho = (1 + 4 * L_M * γ^2 * μ_M * (m + 1)) / (μ_M * γ * m * (1 - 4L_M * γ))
+            if rho >= 1
+                @warn "convergence condition violated...provide a stepsize!"
                 return nothing
-            else
-                L_M = maximum(iter.L)
-                μ_M = maximum(iter.μ)
-                γ = 1 / (10 * L_M)
-                # condition Theorem 3.1
-                rho = (1 + 4 * L_M * γ^2 * μ_M * (N + 1)) / (μ_M * γ * N * (1 - 4L_M * γ))
-                if rho >= 1
-                    @warn "convergence condition violated...provide a stepsize!"
-                end
             end
         end
     else
@@ -64,13 +61,13 @@ function Base.iterate(iter::SVRG_basic_iterable{R}) where {R}
     z_full = copy(iter.x0)
     z = zero(av)
     w = copy(iter.x0)
-    state = SVRG_basic_state(γ, m, av, z, z_full, w, ind)
+    state = SVRG_prox_state(γ, m, av, z, z_full, w, ind)
     return state, state
 end
 
-function Base.iterate(iter::SVRG_basic_iterable{R}, state::SVRG_basic_state{R}) where {R}
+function Base.iterate(iter::SVRG_prox_iterable{R}, state::SVRG_prox_state{R}) where {R}
     # The inner cycle
-    for i in rand(state.ind, state.m)
+    for i in rand(state.ind, state.m)  # Uniformly randomly pick one index \in [N] (with replacement) in each iteration
         gradient!(state.temp, iter.F[i], state.z_full)
         gradient!(state.∇f_temp, iter.F[i], state.w)
         state.temp .-= state.∇f_temp
@@ -80,20 +77,19 @@ function Base.iterate(iter::SVRG_basic_iterable{R}, state::SVRG_basic_state{R}) 
         CIAOAlgorithms.prox!(state.w, iter.g, state.temp, state.γ)
         state.z .+= state.w   # keeping track of the sum of w's
     end
+
     # full update 	
-    state.z_full .= state.w #state.z ./ state.m
-    # iter.plus || (state.w .= state.z_full) # only for basic SVRG
-    state.z = zero(state.z)  # for next iterate 
+    state.z_full .= state.w # state.z ./ state.m
+    state.z = zero(state.z)  
     state.av .= state.z
     for i = 1:iter.N
         gradient!(state.∇f_temp, iter.F[i], state.z_full)
         state.∇f_temp ./= iter.N
         state.av .+= state.∇f_temp
     end
-    # iter.plus && (state.m *= 2) # only for SVRG++
 
     return state, state
 end
 
 
-solution(state::SVRG_basic_state) = state.z_full
+solution(state::SVRG_prox_state) = state.z_full

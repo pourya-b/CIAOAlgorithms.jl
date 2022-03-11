@@ -1,0 +1,80 @@
+struct SGD_prox_DNN_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg}
+    F::Union{Array{Tf},Tf}            # smooth term  
+    g::Tg                   # nonsmooth term 
+    x0::Tx                  # initial point
+    N::Int                  # of data points in the finite sum problem 
+    L::Maybe{Union{Array{R},R}}  # Lipschitz moduli of nabla f_i	
+    μ::Maybe{Union{Array{R},R}}  # convexity moduli of the gradients
+    γ::Maybe{R}             # stepsize 
+    plus::Bool              # plus version (diminishing stepsize)
+    η0::R
+    η_tilde::R
+end
+
+mutable struct SGD_prox_DNN_state{R<:Real,Tx}
+    γ::R                    # stepsize 
+    z::Tx
+    cind::Int               # current interation index
+    idxr::Int               # current index
+    # some extra placeholders 
+    ∇f_temp::Tx             # placeholder for gradients 
+    temp::Tx
+end
+
+function SGD_prox_DNN_state(γ::R, z::Tx, cind) where {R,Tx}
+    return SGD_prox_DNN_state{R,Tx}(γ, z, cind, Int(0), copy(z), copy(z))
+end
+
+function Base.iterate(iter::SGD_prox_DNN_iterable{R}) where {R}
+    println("started")
+    N = iter.N
+    ind = collect(1:N)
+    # updating the stepsize 
+    if iter.γ === nothing && !iter.plus
+        if iter.L === nothing
+            @warn "smoothness or convexity parameter absent"
+            return nothing
+        else
+            L_M = maximum(iter.L)
+            γ = 1/ (2*L_M)
+        end
+    else
+        γ = iter.γ # provided γ
+    end
+    if iter.plus
+        println("diminishing stepsize version")
+        γ = 0.0
+    end
+    # initializing
+    cind = 0
+    state = SGD_prox_DNN_state(γ, iter.x0, cind)
+    return state, state
+end
+
+function Base.iterate(iter::SGD_prox_DNN_iterable{R}, state::SGD_prox_DNN_state{R}) where {R}
+    # The inner cycle
+    
+    for i=1:iter.N # just for speed in implementation
+        state.cind += 1
+        if iter.plus
+            state.γ = iter.η0/(1 + iter.η_tilde * floor(state.cind/iter.N))
+        end
+        if mod(state.cind,1000) == 0
+            println("iter: $(i)")
+            flush(stdout)
+        end
+
+        # gradient!(state.∇f_temp, iter.F[i], state.z)
+        state.∇f_temp .= (Flux.gradient(() -> iter.F[i](state.z), params(state.z)))[state.z][:,1]
+
+        state.∇f_temp .*= - state.γ
+        state.∇f_temp ./= iter.N 
+        state.∇f_temp .+= state.z
+
+        CIAOAlgorithms.prox!(state.z, iter.g, state.∇f_temp, state.γ)
+    end
+
+    return state, state
+end
+
+solution(state::SGD_prox_DNN_state) = state.z

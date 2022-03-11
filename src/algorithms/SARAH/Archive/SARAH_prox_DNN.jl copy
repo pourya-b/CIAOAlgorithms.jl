@@ -1,5 +1,5 @@
-struct SARAH_prox_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg}
-    F::Array{Tf}            # smooth term - array of f_i s 
+struct SARAH_prox_DNN_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg}
+    F::Union{Array{Tf},Tf}            # smooth term - array of f_i s 
     g::Tg                   # nonsmooth part
     x0::Tx                  # initial point
     N::Int                  # of data points in the finite sum problem 
@@ -7,10 +7,10 @@ struct SARAH_prox_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,T
     μ::Maybe{Union{Array{R},R}}  # convexity moduli of the gradients
     γ::Maybe{R}             # stepsize (a single scalar)
     m::Maybe{Int}           # number of inner loop updates
-    ꞵ::Maybe{R}             # scalar momentum 
+    ꞵ::Maybe{R}             # a scalar momentum 
 end
 
-mutable struct SARAH_prox_state{R<:Real,Tx}
+mutable struct SARAH_prox_DNN_state{R<:Real,Tx}
     γ::R                    # stepsize 
     m::Maybe{Int}           # number of inner loop updates
     ꞵ::R                    # momentum 
@@ -24,20 +24,19 @@ mutable struct SARAH_prox_state{R<:Real,Tx}
     temp::Tx                # placeholder for gradients 
 end
 
-function SARAH_prox_state(γ::R, m, ꞵ::R, av::Tx, w::Tx, w_plus::Tx, ind) where {R,Tx}
-    return SARAH_prox_state{R,Tx}(γ, m, ꞵ, av, w, w_plus, ind, copy(av), copy(av))
+function SARAH_prox_DNN_state(γ::R, m, ꞵ::R, av::Tx, w::Tx, w_plus::Tx, ind) where {R,Tx}
+    return SARAH_prox_DNN_state{R,Tx}(γ, m, ꞵ, av, w, w_plus, ind, copy(av), copy(av))
 end
 
-function Base.iterate(iter::SARAH_prox_iterable{R}) where {R} 
+function Base.iterate(iter::SARAH_prox_DNN_iterable{R}) where {R} 
     N = iter.N
     m = iter.m
     batch = 1
     ω = (3*(N-batch))/(2*batch*(N-1))
     ind = collect(1:N) # a vector of 1 to N 
-    
     # updating the stepsize 
     if iter.γ === nothing
-        γ = (2*sqrt(ω * m)) / (4*sqrt(ω * m) + 1) # based on thm 8 of "ProxSARAH: An Efficient Algorithmic Framework for Stochastic Composite Nonconvex Optimization"
+        γ = (2*sqrt(ω * m)) / (4*sqrt(ω * m) + 1)
     else
         γ = iter.γ # provided γ
     end
@@ -48,7 +47,7 @@ function Base.iterate(iter::SARAH_prox_iterable{R}) where {R}
             return nothing
         else
             L_M = maximum(iter.L)
-            ꞵ = 1/(L_M * sqrt(ω * m)) # based on thm 8 of "ProxSARAH: An Efficient Algorithmic Framework for Stochastic Composite Nonconvex Optimization"
+            ꞵ = 1/(L_M * sqrt(ω * m)) 
         end
     else
         ꞵ = iter.ꞵ
@@ -58,7 +57,8 @@ function Base.iterate(iter::SARAH_prox_iterable{R}) where {R}
     av = zero(iter.x0) 
     w_plus = zero(iter.x0)
     for i = 1:N
-        ∇f, ~ = gradient(iter.F[i], iter.x0) 
+        ∇f = (Flux.gradient(() -> iter.F(i,iter.x0), params(iter.x0)))[iter.x0][:,1]
+        # ∇f, ~ = gradient(iter.F[i], iter.x0) 
         ∇f ./= N
         av .+= ∇f 
     end
@@ -67,16 +67,17 @@ function Base.iterate(iter::SARAH_prox_iterable{R}) where {R}
     w_plus .*= ꞵ
     w_plus .+= (1 - ꞵ) * w
 
-    state = SARAH_prox_state(γ, m, ꞵ, av, w, w_plus, ind)
+    state = SARAH_prox_DNN_state(γ, m, ꞵ, av, w, w_plus, ind)
     return state, state
 end
 
-function Base.iterate(iter::SARAH_prox_iterable{R}, state::SARAH_prox_state{R}) where {R}
-    # based on alg 1 of "ProxSARAH: An Efficient Algorithmic Framework for Stochastic Composite Nonconvex Optimization"
+function Base.iterate(iter::SARAH_prox_DNN_iterable{R}, state::SARAH_prox_DNN_state{R}) where {R}
     # The inner cycle
-    for i in rand(state.ind, state.m)  # Uniformly randomly pick one index \in [N] (with replacement) in each iteration
-        gradient!(state.temp, iter.F[i], state.w_plus) 
-        gradient!(state.∇f_temp, iter.F[i], state.w)
+    for i in rand(state.ind, state.m)
+        # gradient!(state.temp, iter.F[i], state.w_plus) 
+        state.temp .= (Flux.gradient(() -> iter.F(i,state.w_plus), params(state.w_plus)))[state.w_plus][:,1]
+        # gradient!(state.∇f_temp, iter.F[i], state.w)
+        state.∇f_temp .= (Flux.gradient(() -> iter.F(i,state.w), params(state.w)))[state.w][:,1]
         state.av .+= state.temp
         state.av .-= state.∇f_temp
 
@@ -91,12 +92,12 @@ function Base.iterate(iter::SARAH_prox_iterable{R}, state::SARAH_prox_state{R}) 
         state.temp .*= 1-state.ꞵ
         state.w_plus .+= state.temp
     end
-
     # full update 	
     state.w .= state.w_plus
     state.av .= zero(state.w)  # for next iterate 
     for i = 1:iter.N
-        gradient!(state.∇f_temp, iter.F[i], state.w)
+        # gradient!(state.∇f_temp, iter.F[i], state.w)
+        state.∇f_temp .= (Flux.gradient(() -> iter.F(i,state.w), params(state.w)))[state.w][:,1]
         state.∇f_temp ./= iter.N
         state.av .+= state.∇f_temp
     end
@@ -113,4 +114,4 @@ function Base.iterate(iter::SARAH_prox_iterable{R}, state::SARAH_prox_state{R}) 
     return state, state
 end
 
-solution(state::SARAH_prox_state) = state.w_plus
+solution(state::SARAH_prox_DNN_state) = state.w_plus
