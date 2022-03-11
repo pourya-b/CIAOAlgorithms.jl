@@ -16,30 +16,32 @@ using ProximalAlgorithms.IterationTools
 using Printf
 using Base.Iterators
 using Random
+# using Flux # for DNN training
 
 export solution
 
-include("SVRG_basic.jl")
+include("SVRG_prox.jl")
+# include("SVRG_basic_DNN.jl")
 
 struct SVRG{R<:Real}
     γ::Maybe{R}
     maxit::Int
     verbose::Bool
     freq::Int
-    m::Maybe{Int}
-    plus::Bool
+    m::Maybe{Int}  # number of epochs for inner loop 
+    DNN::Bool
     function SVRG{R}(;
         γ::Maybe{R} = nothing,
         maxit::Int = 10000,
         verbose::Bool = false,
         freq::Int = 1000,
         m::Maybe{Int} = nothing,
-        plus::Bool = false,
+        DNN::Bool = false,
     ) where {R}
         @assert γ === nothing || γ > 0
         @assert maxit > 0
         @assert freq > 0
-        new(γ, maxit, verbose, freq, m, plus)
+        new(γ, maxit, verbose, freq, m, DNN)
     end
 end
 
@@ -52,21 +54,14 @@ function (solver::SVRG{R})(
     N = N,
 ) where {R,C<:RealOrComplex{R}}
 
-    stop(state::SVRG_basic_state) = false
+    stop(state::SVRG_prox_state) = false
     disp(it, state) = @printf "%5d | %.3e  \n" it state.γ
 
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
-    m = solver.m === nothing ? m = N : m = solver.m
-
-    maxit = solver.maxit
-    if solver.plus && solver.maxit > 25
-        maxit = 25
-        @warn "exponential number of inner updates...reverted to 25 maximum iterations"
-    end
-
+    solver.m === nothing ? m = N : m = solver.m
 
     # dispatching the structure
-    iter = SVRG_basic_iterable(F, g, x0, N, L, μ, solver.γ, m, solver.plus)
+    iter = SVRG_prox_iterable(F, g, x0, N, L, μ, solver.γ, m, solver.plus)
     iter = take(halt(iter, stop), maxit)
     iter = enumerate(iter)
     num_iters, state_final = nothing, nothing
@@ -85,7 +80,7 @@ end
 
 
 """
-    SVRG([γ, maxit, verbose, freq, m, plus])
+    SVRG([γ, maxit, verbose, freq, m])
 
 Instantiate the SVRG algorithm  for solving (strongly) convex optimization problems of the form
     
@@ -105,7 +100,6 @@ Optional keyword arguments are:
 * `maxit::Integer` (default: `10000`), maximum number of iterations to perform.
 * `verbose::Bool` (default: `true`), whether or not to print information during the iterations.
 * `freq::Integer` (default: `100`), frequency of verbosity.
-* `plus::Bool` !
 
 """
 
@@ -139,9 +133,13 @@ function iterator(
     N = N,
 ) where {R,C<:RealOrComplex{R}}
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
-    m = solver.m === nothing ? m = N : m = solver.m
+    solver.m === nothing ? m = N : m = solver.m
     # dispatching the iterator
-    iter = SVRG_basic_iterable(F, g, x0, N, L, μ, solver.γ, m, solver.plus)
+    if solver.DNN
+        iter = SVRG_basic_DNN_iterable(F, g, x0, N, L, μ, solver.γ, m)
+    else
+        iter = SVRG_prox_iterable(F, g, x0, N, L, μ, solver.γ, m)
+    end
 
     return iter
 end

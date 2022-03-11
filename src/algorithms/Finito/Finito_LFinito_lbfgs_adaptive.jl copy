@@ -47,7 +47,6 @@ mutable struct FINITO_lbfgs_adaptive_state{R<:Real,Tx, TH}
     u::Tx                   # linesearch candidate u^k
     inds::Array{Int}        # An array containing the indices of block batches
     τ::Float64              # interpolation parameter between the quasi-Newton direction and the nominal step 
-    test::R
 end
 
 function FINITO_lbfgs_adaptive_state(γ, hat_γ::R, s0::Tx, ind, d, H::TH, sum_tz, sum_nrm_tz, sum_∇fz, sum_innprod_tz, sum_ftz) where {R,Tx,TH}
@@ -71,7 +70,7 @@ function FINITO_lbfgs_adaptive_state(γ, hat_γ::R, s0::Tx, ind, d, H::TH, sum_t
         copy(s0), 
         copy(s0), 
         copy(s0),
-        sum_∇fz, #20
+        copy(s0), #20
         copy(s0),
         nothing, # z_prev
         copy(s0),
@@ -79,8 +78,7 @@ function FINITO_lbfgs_adaptive_state(γ, hat_γ::R, s0::Tx, ind, d, H::TH, sum_t
         copy(s0),
         copy(s0),
         collect(1:d),
-        1.0,
-        0.0
+        1.0
         )
 end
 
@@ -159,7 +157,7 @@ function Base.iterate(
     state::FINITO_lbfgs_adaptive_state{R},
 ) where {R}
 
-    # prox!(state.z, iter.g, state.s, state.hat_γ) # z^k in Alg. 1&2    
+    return state, state
 
     
     if state.z_prev === nothing  # for lbfgs updates
@@ -181,20 +179,14 @@ function Base.iterate(
             state.sum_fz += iter.F[i](state.z)
         end 
 
-        ls_lhs = state.sum_fz #* # lhs and rhs of the ls condition (Table 1, 1b)
+        ls_lhs = state.sum_fz # lhs and rhs of the ls condition (Table 1, 1b)
         ls_lhs -= real(dot(state.sum_∇fu, state.z))
         ls_lhs -= state.sum_ftz 
         ls_lhs += state.sum_innprod_tz
-
         temp = (norm(state.z)^2)/(2*state.hat_γ) + (state.sum_nrm_tz)/2
-        ls_rhs =  (1 + 0) * temp - real(dot(state.sum_tz, state.z)) # bug prone
+        ls_rhs =  (1 + 10^-6) * temp - real(dot(state.sum_tz, state.z)) # bug prone
         ls_rhs *= iter.N * iter.α
 
-        # println("ls1: $(ls_lhs) & $(ls_rhs)")
-        # println("z: $(norm(state.z))")
-        # println("u: $(norm(state.u))")
-        
-        
         tol = 10^(-6)  * (1 + abs(ls_rhs)) # bug prone
         R(ls_lhs) <= ls_rhs + tol && break  # the ls condition (Table 1, 1b)
         println("ls 1")
@@ -205,7 +197,6 @@ function Base.iterate(
         state.s .-=  ((state.hat_γ - γ_prev) / iter.N) .* state.sum_∇fu
         reset!(state.H)
     end   
-
     # now z^k is fixed, moving to step 2
 
     sum_innprod_z = R(0) # for ls 2
@@ -247,8 +238,6 @@ function Base.iterate(
         state.bs .-=  ((state.hat_γ - γ_prev) / iter.N) .* state.sum_∇fz
         reset!(state.H)
     end   
-
-
     # now v^k and bs are fixed, moving to step 4
     state.v .-= state.z # v^k - z^k
     
@@ -331,10 +320,6 @@ function Base.iterate(
         state.τ *= iter.β   # backtracking on τ
         println("ls on τ")
     end
-
-    # println("u norm: $(norm(state.u))")
-    # return state, state
-
     state.s .= state.ts # step 6
 
     iter.sweeping == 2 && (state.inds = randperm(state.d)) # shuffled (only shuffeling the batch indices not the indices inside of each batch)
@@ -393,5 +378,4 @@ function Base.iterate(
     return state, state
 end
 solution(state::FINITO_lbfgs_adaptive_state) = state.z
-# solution(state::FINITO_lbfgs_adaptive_state) = state.test
 epoch_count(state::FINITO_lbfgs_adaptive_state) = state.τ   # number of epochs is epoch_per_iter + log_β(τ) , where tau is from ls and epoch_per_iter is 3 or 4. Refer to it_counter function in utilities.jl

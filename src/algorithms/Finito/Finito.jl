@@ -17,67 +17,68 @@
 using LinearAlgebra
 using ProximalOperators
 using ProximalAlgorithms.IterationTools
-# using ProximalAlgorithms: LBFGS, update!, mul!
-using Printf
+using ProximalAlgorithms: LBFGS, update!, mul!
 using Base.Iterators # to use take and enumerate functions
 using Random
 using StatsBase: sample
+# using Flux           # for DNN training
 
+import ProximalOperators: prox!, prox, gradient, gradient!
 export solution, epoch_count
 
+abstract type CIAO_iterable end 
 
-abstract type CIAO_iterable end #? what is this? where is used?
+include("Finito_basic.jl")                  # Finito/MISO
+include("Finito_LFinito.jl")                # SPIRAL-no-ls
+include("Finito_LFinito_lbfgs.jl")          # SPIRAL
+include("Finito_LFinito_lbfgs_adaptive.jl") #adaSPIRAL
 
+# include("Finito_adaptive.jl")
+# include("Finito_DLFinito.jl")
+# include("Finito_DLFinito_lbfgs.jl")
+# include("Finito_LFinito_lbfgs_adaptive_DNN.jl")
 
-include("Finito_basic.jl")
-include("Finito_LFinito.jl")
-include("Finito_adaptive.jl")
-include("Finito_LFinito_lbfgs.jl")
-include("Finito_DLFinito.jl")
-include("Finito_DLFinito_lbfgs.jl")
-include("Finito_LFinito_lbfgs_adaptive.jl")
-
-
-
-struct Finito{R<:Real}
-    γ::Maybe{Union{Array{R},R}} #? this is defined in CIAOAlgorithms, where CIAOAlgorithms is called/used? #other questions in that file ...
-    sweeping::Int8
-    LFinito::Bool
+struct Finito{R<:Real} # solver
+    γ::Maybe{Union{Array{R},R}}     #stepsize
+    sweeping::Int8                  # sweeping strategy in the inner loop, # 1:cyclical, 2:shuffled
+    LFinito::Bool                   # if true, no-ls version
     lbfgs::Bool
-    memory::Int
+    memory::Int                     # lbfgs memory size
+    η::R                            # ls parameter for γ
+    β::R                            # ls parameter for τ (interpolation between the quasi-Newton direction and the nominal step)
     adaptive::Bool
-    DeepLFinito::Tuple{Bool,Int, Int}
+    DeepLFinito::Tuple{Bool,Int,Int}
     minibatch::Tuple{Bool,Int}
     maxit::Int
     verbose::Bool
     freq::Int
-    α::R
-    tol::R
-    tol_b::R
+    α::R                            # in (0, 1) for stepsize
+    tol::R                        # γ backtracking stopping criterion
+    DNN_training::Bool
     function Finito{R}(;
         γ::Maybe{Union{Array{R},R}} = nothing,
         sweeping = 1,
         LFinito::Bool = false,
         lbfgs::Bool = false,
-        memory::Int = 6, # lbfgs memory
+        memory::Int = 6, 
+        η::R = 0.7,
+        β::R = 1/50,
         adaptive::Bool = false,
-        # DeepLFinito::Tuple{Bool,Int} = (false, 3),
         DeepLFinito::Tuple{Bool,Int, Int} = (false, 3, 3),
         minibatch::Tuple{Bool,Int} = (false, 1),
         maxit::Int = 10000,
         verbose::Bool = false,
         freq::Int = 10000,
-        α::R = R(0.999), # R is type
-        tol::R = R(1e-8),
-        tol_b::R = R(1e-9),
+        α::R = R(0.999), 
+        tol::R = R(1e-9),
+        DNN_training::Bool = false,
     ) where {R}
         @assert γ === nothing || minimum(γ) > 0
         @assert maxit > 0
         @assert memory >= 0
         @assert tol > 0
-        @assert tol_b > 0
         @assert freq > 0
-        new(γ, sweeping, LFinito, lbfgs, memory, adaptive, DeepLFinito, minibatch, maxit, verbose, freq, α, tol, tol_b)
+        new(γ, sweeping, LFinito, lbfgs, memory, η, β, adaptive, DeepLFinito, minibatch, maxit, verbose, freq, α, tol, DNN_training)
     end
 end
 
@@ -90,42 +91,32 @@ function (solver::Finito{R})( # this is a function definition. if solver = Finit
 ) where {R,C<:RealOrComplex{R}}
 
     stop(state) = false # the stopping function for halt function
-
     disp(it, state) = @printf "%5d | %.3e  \n" it state.hat_γ
 
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
-    if solver.LFinito
-        if solver.DeepLFinito[1]
-            iter = FINITO_DLFinito_iterable(
-                F,
-                g,
-                x0,
-                N,
-                L,
-                solver.γ,
-                solver.sweeping,
-                solver.minibatch[2],
-                solver.α,
-                solver.DeepLFinito[2],
-                solver.DeepLFinito[3],
-            )
-        else
-            iter = FINITO_LFinito_iterable(
-                F,
-                g,
-                x0,
-                N,
-                L,
-                solver.γ,
-                solver.sweeping,
-                solver.minibatch[2],
-                solver.α,
-            )
-        end
-    elseif solver.lbfgs
-        if solver.DeepLFinito[1]
-            iter = FINITO_DFlbfgs_iterable(
+    if solver.DNN_training
+        iter = FINITO_lbfgs_adaptive_DNN_iterable(
+            F,
+            F_full,
+            g,
+            x0,
+            N,
+            L,
+            solver.γ,
+            solver.η,
+            solver.β,
+            solver.sweeping,
+            solver.minibatch[2],
+            solver.α,
+            LBFGS(w0, solver.memory),
+            solver.adaptive,
+            solver.tol,
+            data,
+            DNN_config
+        )
+    elseif solver.LFinito # no-ls
+        iter = FINITO_LFinito_iterable(
             F,
             g,
             x0,
@@ -135,11 +126,9 @@ function (solver::Finito{R})( # this is a function definition. if solver = Finit
             solver.sweeping,
             solver.minibatch[2],
             solver.α,
-            LBFGS(x0, solver.memory),
-            solver.DeepLFinito[2],
-            solver.DeepLFinito[3]
         )
-        elseif solver.adaptive
+    elseif solver.lbfgs
+        if solver.adaptive # adaSPIRAL
             iter = FINITO_lbfgs_adaptive_iterable(
                 F,
                 g,
@@ -147,13 +136,15 @@ function (solver::Finito{R})( # this is a function definition. if solver = Finit
                 N,
                 L,
                 solver.γ,
+                solver.η,
+                solver.β,
                 solver.sweeping,
                 solver.minibatch[2],
                 solver.α,
                 LBFGS(x0, solver.memory),
-                solver.adaptive
+                solver.tol,
             )
-        else
+        else #SPIRAL
             iter = FINITO_lbfgs_iterable(
                 F,
                 g,
@@ -161,25 +152,14 @@ function (solver::Finito{R})( # this is a function definition. if solver = Finit
                 N,
                 L,
                 solver.γ,
+                solver.β,
                 solver.sweeping,
                 solver.minibatch[2],
                 solver.α,
                 LBFGS(x0, solver.memory),
             )
         end
-    elseif solver.adaptive
-        iter = FINITO_adaptive_iterable(
-            F,
-            g,
-            x0,
-            N,
-            L,
-            solver.tol,
-            solver.tol_b,
-            solver.sweeping,
-            solver.α,
-        )
-    else
+    else # Finito/MISO
         iter = FINITO_basic_iterable(
             F,
             g,
@@ -193,7 +173,7 @@ function (solver::Finito{R})( # this is a function definition. if solver = Finit
         )
     end
 
-    iter = halt(iter, stop) #? where is halt defined?
+    iter = halt(iter, stop)
     iter = take(iter, solver.maxit)
     iter = enumerate(iter)
 
@@ -212,7 +192,7 @@ function (solver::Finito{R})( # this is a function definition. if solver = Finit
 end
 
 """
-    Finito([γ, sweeping, LFinito, adaptive, minibatch, maxit, verbose, freq, tol, tol_b])
+    Finito([γ, sweeping, LFinito, adaptive, minibatch, maxit, verbose, freq, tol])
 
 Instantiate the Finito algorithm for solving fully nonconvex optimization problems of the form
 
@@ -229,7 +209,7 @@ smoothness moduli of f_i's; it is optional in the adaptive mode or if γ is prov
 
 Optional keyword arguments are:
 * `γ`: an array of N stepsizes for each coordinate
-* `sweeping::Int` 1 for uniform randomized (default), 2 for cyclic, 3 for shuffled
+* `sweeping::Int` 1 for cyclic (default), 2 for shuffled
 * `LFinito::Bool` low memory variant of the Finito/MISO algorithm
 * `adaptive::Bool` to activate adaptive smoothness parameter computation
 * `minibatch::(Bool,Int)` to use batchs of a given size
@@ -238,7 +218,6 @@ Optional keyword arguments are:
 * `freq::Integer` (default: `10000`), frequency of verbosity.
 * `α::R` parameter where γ_i = αN/L_i
 * `tol::Real` (default: `1e-8`), absolute tolerance for the adaptive case
-* `tol_b::R` tolerance for the backtrack (default: `1e-9`)
 """
 
 Finito(::Type{R}; kwargs...) where {R} = Finito{R}(; kwargs...) #? outer constructor? why is needed? where it is used? Type{R}?
@@ -264,45 +243,40 @@ and https://docs.julialang.org/en/v1/base/iterators/ for a list of iteration uti
 
 function iterator( #? how it is called?
     solver::Finito{R},
-    x0::AbstractArray{C};
+    x0::Union{AbstractArray{C},Tp};
     F = nothing,
     g = ProximalOperators.Zero(),
     L = nothing,
     N = N,
-) where {R,C<:RealOrComplex{R}}
+    F_full = nothing, # finite-sum
+    data   = nothing, # training data for DNN training
+    DNN_config::Maybe{Tdnn} = nothing
+) where {R,C<:RealOrComplex{R},Tp,Tdnn}
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
-    if solver.LFinito
-        if solver.DeepLFinito[1]
-            iter = FINITO_DLFinito_iterable(
-                F,
-                g,
-                x0,
-                N,
-                L,
-                solver.γ,
-                solver.sweeping,
-                solver.minibatch[2],
-                solver.α,
-                solver.DeepLFinito[2],
-                solver.DeepLFinito[3],
-            )
-        else
-            iter = FINITO_LFinito_iterable(
-                F,
-                g,
-                x0,
-                N,
-                L,
-                solver.γ,
-                solver.sweeping,
-                solver.minibatch[2],
-                solver.α,
-            )
-        end
-    elseif solver.lbfgs
-        if solver.DeepLFinito[1]
-            iter = FINITO_DFlbfgs_iterable(
+    DNN_config == nothing ? w0 = copy(x0) : w0 = DNN_config()
+    if solver.DNN_training
+        iter = FINITO_lbfgs_adaptive_DNN_iterable(
+            F,
+            F_full,
+            g,
+            x0,
+            N,
+            L,
+            solver.γ,
+            solver.η,
+            solver.β,
+            solver.sweeping,
+            solver.minibatch[2],
+            solver.α,
+            LBFGS(w0, solver.memory),
+            solver.adaptive,
+            solver.tol,
+            data,
+            DNN_config
+        )
+    elseif solver.LFinito # no-ls
+        iter = FINITO_LFinito_iterable(
             F,
             g,
             x0,
@@ -312,11 +286,9 @@ function iterator( #? how it is called?
             solver.sweeping,
             solver.minibatch[2],
             solver.α,
-            LBFGS(x0, solver.memory),
-            solver.DeepLFinito[2],
-            solver.DeepLFinito[3]
         )
-        elseif solver.adaptive
+    elseif solver.lbfgs
+        if solver.adaptive # adaSPIRAL
             iter = FINITO_lbfgs_adaptive_iterable(
                 F,
                 g,
@@ -324,14 +296,15 @@ function iterator( #? how it is called?
                 N,
                 L,
                 solver.γ,
+                solver.η,
+                solver.β,
                 solver.sweeping,
                 solver.minibatch[2],
                 solver.α,
                 LBFGS(x0, solver.memory),
-                solver.adaptive,
-                solver.tol_b,
+                solver.tol,
             )
-        else
+        else #SPIRAL
             iter = FINITO_lbfgs_iterable(
                 F,
                 g,
@@ -339,25 +312,14 @@ function iterator( #? how it is called?
                 N,
                 L,
                 solver.γ,
+                solver.β,
                 solver.sweeping,
                 solver.minibatch[2],
                 solver.α,
                 LBFGS(x0, solver.memory),
             )
         end
-    elseif solver.adaptive
-        iter = FINITO_adaptive_iterable(
-            F,
-            g,
-            x0,
-            N,
-            L,
-            solver.tol,
-            solver.tol_b,
-            solver.sweeping,
-            solver.α,
-        )
-    else
+    else # Finito/MISO
         iter = FINITO_basic_iterable(
             F,
             g,
@@ -372,8 +334,3 @@ function iterator( #? how it is called?
     end
     return iter
 end
-
-
-
-#### TODO
-    # remove finito_adaptive

@@ -29,6 +29,8 @@ function Base.iterate(iter::SARAH_basic_iterable{R}) where {R} #? we doesn't nee
     N = iter.N
     m = iter.m
     ind = collect(1:N) # a vector of 1 to N 
+    L_M = maximum(iter.L)
+
     # updating the stepsize 
     if iter.γ === nothing
         if iter.μ === nothing # means it is nonconvex
@@ -36,14 +38,14 @@ function Base.iterate(iter::SARAH_basic_iterable{R}) where {R} #? we doesn't nee
                 @warn "smoothness parameter absent"
                 return nothing
             else
-                L_M = maximum(iter.L) # bug prone: double-check this
-                # γ = 2 / (L_M * (1+sqrt(1+4*iter.m))) # bug prone: double-check this
                 γ = 0.5 / L_M 
             end
         elseif maximum(iter.μ) == 0 # convex
             @warn "convex problem"
+            γ = 0.5 / L_M 
         else
             @warn "strongly convex problem"
+            γ = 0.5 / L_M 
         end
     else
         γ = iter.γ # provided γ
@@ -65,7 +67,7 @@ end
 
 function Base.iterate(iter::SARAH_basic_iterable{R}, state::SARAH_basic_state{R}) where {R}
     # The inner cycle
-    for i in rand(state.ind, state.m)
+    for i in rand(state.ind, state.m) # Uniformly randomly pick one index \in [N] (with replacement) in each iteration
         gradient!(state.temp, iter.F[i], state.w_plus) 
         gradient!(state.∇f_temp, iter.F[i], state.w)
         state.av .+= state.temp
@@ -76,6 +78,7 @@ function Base.iterate(iter::SARAH_basic_iterable{R}, state::SARAH_basic_state{R}
         state.w .= state.w_plus
         state.w_plus .-= state.temp
     end
+    
     # full update 	
     state.w .= state.w_plus
     state.av .= zero(state.w)  # for next iterate 
@@ -92,3 +95,7 @@ function Base.iterate(iter::SARAH_basic_iterable{R}, state::SARAH_basic_state{R}
 end
 
 solution(state::SARAH_basic_state) = state.w_plus
+
+## TO DO:
+## provide appropriate stepsizes for different convexity levels
+## provide the corresponding references for each stepsize 
