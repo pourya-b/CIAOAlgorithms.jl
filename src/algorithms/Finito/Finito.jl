@@ -53,7 +53,8 @@ struct Finito{R<:Real} # solver
     verbose::Bool
     freq::Int
     α::R                            # in (0, 1) for stepsize
-    tol::R                        # γ backtracking stopping criterion
+    tol::R                          # γ backtracking stopping criterion
+    ls_tol::R                       # tolerance in ls
     DNN_training::Bool
     function Finito{R}(;
         γ::Maybe{Union{Array{R},R}} = nothing,
@@ -71,6 +72,7 @@ struct Finito{R<:Real} # solver
         freq::Int = 10000,
         α::R = R(0.999), 
         tol::R = R(1e-9),
+        ls_tol::R = eps(R),
         DNN_training::Bool = false,
     ) where {R}
         @assert γ === nothing || minimum(γ) > 0
@@ -78,7 +80,7 @@ struct Finito{R<:Real} # solver
         @assert memory >= 0
         @assert tol > 0
         @assert freq > 0
-        new(γ, sweeping, LFinito, lbfgs, memory, η, β, adaptive, DeepLFinito, minibatch, maxit, verbose, freq, α, tol, DNN_training)
+        new(γ, sweeping, LFinito, lbfgs, memory, η, β, adaptive, DeepLFinito, minibatch, maxit, verbose, freq, α, ls_tol, tol, DNN_training)
     end
 end
 
@@ -143,6 +145,7 @@ function (solver::Finito{R})( # this is a function definition. if solver = Finit
                 solver.α,
                 LBFGS(x0, solver.memory),
                 solver.tol,
+                solver.ls_tol,
             )
         else #SPIRAL
             iter = FINITO_lbfgs_iterable(
@@ -157,6 +160,7 @@ function (solver::Finito{R})( # this is a function definition. if solver = Finit
                 solver.minibatch[2],
                 solver.α,
                 LBFGS(x0, solver.memory),
+                solver.ls_tol,
             )
         end
     else # Finito/MISO
@@ -303,6 +307,7 @@ function iterator( #? how it is called?
                 solver.α,
                 LBFGS(x0, solver.memory),
                 solver.tol,
+                solver.ls_tol,
             )
         else #SPIRAL
             iter = FINITO_lbfgs_iterable(
@@ -317,6 +322,7 @@ function iterator( #? how it is called?
                 solver.minibatch[2],
                 solver.α,
                 LBFGS(x0, solver.memory),
+                solver.ls_tol,
             )
         end
     else # Finito/MISO
@@ -334,3 +340,6 @@ function iterator( #? how it is called?
     end
     return iter
 end
+
+## TO DO:
+# ls counter in adaptive mode
