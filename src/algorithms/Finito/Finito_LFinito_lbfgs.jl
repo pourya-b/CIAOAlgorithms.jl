@@ -12,6 +12,7 @@ struct FINITO_lbfgs_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf
     batch::Int              # batch size
     α::R                    # in (0, 1), e.g.: 0.99
     H::TH                   # LBFGS struct
+    ls_tol::R               # tolerance in ls
 end
 
 mutable struct FINITO_lbfgs_state{R<:Real,Tx, TH}
@@ -154,8 +155,7 @@ function Base.iterate(
         envVal_trial += real(dot(state.∇f_sum, state.z)) / iter.N # envelope value (lyapunov function) L(y^k,u^k)
         envVal_trial += norm(state.z)^2 / (2 *  state.hat_γ)
 
-        tol = 10^(-6) * abs(envVal) # bug prone!!
-        envVal_trial <= envVal + tol && break # descent on the envelope function
+        envVal_trial <= envVal + iter.ls_tol && break # bug prone!! # descent on the envelope function
         state.τ *= iter.β # backtracking on τ
     end
     state.zbar .= state.z_trial # u^k
