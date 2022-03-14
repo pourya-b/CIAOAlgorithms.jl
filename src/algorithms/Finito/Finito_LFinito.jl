@@ -39,7 +39,7 @@ function FINITO_LFinito_state(γ::Array{R}, hat_γ::R, av::Tx, ind, d) where {R,
     )
 end
 
-function Base.iterate(iter::FINITO_LFinito_iterable{R}) where {R} #? rewriting the Base?
+function Base.iterate(iter::FINITO_LFinito_iterable{R}) where {R} 
     N = iter.N
     r = iter.batch # batch size
     # create index sets

@@ -31,7 +31,7 @@ abstract type CIAO_iterable end
 include("Finito_basic.jl")                  # Finito/MISO
 include("Finito_LFinito.jl")                # SPIRAL-no-ls
 include("Finito_LFinito_lbfgs.jl")          # SPIRAL
-include("Finito_LFinito_lbfgs_adaptive.jl") #adaSPIRAL
+include("Finito_LFinito_lbfgs_adaptive.jl") # adaSPIRAL
 
 # include("Finito_adaptive.jl")
 # include("Finito_DLFinito.jl")
@@ -84,7 +84,7 @@ struct Finito{R<:Real} # solver
     end
 end
 
-function (solver::Finito{R})( # this is a function definition. if solver = Finito(; kwargs...), and then solver(x0;kwargs...) is called, this function will be executed.
+function (solver::Finito{R})( 
     x0::AbstractArray{C};
     F = nothing,
     g = ProximalOperators.Zero(),
@@ -196,7 +196,7 @@ function (solver::Finito{R})( # this is a function definition. if solver = Finit
 end
 
 """
-    Finito([γ, sweeping, LFinito, adaptive, minibatch, maxit, verbose, freq, tol])
+    Finito([γ, sweeping, LFinito, adaptive, minibatch, maxit, verbose, freq, tol, ls_tol, DNN_training])
 
 Instantiate the Finito algorithm for solving fully nonconvex optimization problems of the form
 
@@ -222,9 +222,11 @@ Optional keyword arguments are:
 * `freq::Integer` (default: `10000`), frequency of verbosity.
 * `α::R` parameter where γ_i = αN/L_i
 * `tol::Real` (default: `1e-8`), absolute tolerance for the adaptive case
+* `ls_tol::Real` (default: `eps(R)`), absolute tolerance for the linesearches
+* `DNN_training::Bool` (default: `false`), for DNN training version
 """
 
-Finito(::Type{R}; kwargs...) where {R} = Finito{R}(; kwargs...) #? outer constructor? why is needed? where it is used? Type{R}?
+Finito(::Type{R}; kwargs...) where {R} = Finito{R}(; kwargs...) 
 Finito(; kwargs...) = Finito(Float64; kwargs...)
 
 
@@ -245,7 +247,7 @@ and https://docs.julialang.org/en/v1/base/iterators/ for a list of iteration uti
 """
 
 
-function iterator( #? how it is called?
+function iterator( 
     solver::Finito{R},
     x0::Union{AbstractArray{C},Tp};
     F = nothing,
@@ -279,7 +281,7 @@ function iterator( #? how it is called?
             data,
             DNN_config
         )
-    elseif solver.LFinito # no-ls
+    elseif solver.LFinito # SPIRAL-no-ls
         iter = FINITO_LFinito_iterable(
             F,
             g,
