@@ -21,7 +21,7 @@ using ProximalAlgorithms: LBFGS, update!, mul!
 using Base.Iterators # to use take and enumerate functions
 using Random
 using StatsBase: sample
-# using Flux           # for DNN training
+using Flux           # for DNN training
 
 import ProximalOperators: prox!, prox, gradient, gradient!
 export solution, epoch_count
@@ -32,6 +32,7 @@ include("Finito_basic.jl")                  # Finito/MISO
 include("Finito_LFinito.jl")                # SPIRAL-no-ls
 include("Finito_LFinito_lbfgs.jl")          # SPIRAL
 include("Finito_LFinito_lbfgs_adaptive.jl") # adaSPIRAL
+include("Finito_LFinito_lbfgs_DNN.jl")      # SPIRAL for DNN
 
 # include("Finito_adaptive.jl")
 # include("Finito_DLFinito.jl")
@@ -55,6 +56,7 @@ struct Finito{R<:Real} # solver
     α::R                            # in (0, 1) for stepsize
     tol::R                          # γ backtracking stopping criterion
     ls_tol::R                       # tolerance in ls
+    D::Maybe{R}                     # a large number to normalize lbfgs direction if provided
     DNN_training::Bool
     function Finito{R}(;
         γ::Maybe{Union{Array{R},R}} = nothing,
@@ -62,7 +64,7 @@ struct Finito{R<:Real} # solver
         LFinito::Bool = false,
         lbfgs::Bool = false,
         memory::Int = 6, 
-        η::R = 0.7,
+        η::R = 0.8,
         β::R = 1/50,
         adaptive::Bool = false,
         DeepLFinito::Tuple{Bool,Int, Int} = (false, 3, 3),
@@ -72,7 +74,8 @@ struct Finito{R<:Real} # solver
         freq::Int = 10000,
         α::R = R(0.999), 
         tol::R = R(1e-9),
-        ls_tol::R = eps(R),
+        ls_tol::R = R(1e-6),        # pretty large to avoid numerical instability!
+        D::Maybe{R} = nothing,
         DNN_training::Bool = false,
     ) where {R}
         @assert γ === nothing || minimum(γ) > 0
@@ -80,7 +83,7 @@ struct Finito{R<:Real} # solver
         @assert memory >= 0
         @assert tol > 0
         @assert freq > 0
-        new(γ, sweeping, LFinito, lbfgs, memory, η, β, adaptive, DeepLFinito, minibatch, maxit, verbose, freq, α, ls_tol, tol, DNN_training)
+        new(γ, sweeping, LFinito, lbfgs, memory, η, β, adaptive, DeepLFinito, minibatch, maxit, verbose, freq, α, tol, ls_tol, D, DNN_training)
     end
 end
 
@@ -98,24 +101,18 @@ function (solver::Finito{R})(
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
     if solver.DNN_training
-        iter = FINITO_lbfgs_adaptive_DNN_iterable(
+        iter = FINITO_lbfgs_iterable_DNN(
             F,
-            F_full,
             g,
             x0,
             N,
             L,
             solver.γ,
-            solver.η,
             solver.β,
-            solver.sweeping,
-            solver.minibatch[2],
             solver.α,
             LBFGS(w0, solver.memory),
-            solver.adaptive,
-            solver.tol,
             data,
-            DNN_config
+            DNN_config,
         )
     elseif solver.LFinito # no-ls
         iter = FINITO_LFinito_iterable(
@@ -146,6 +143,7 @@ function (solver::Finito{R})(
                 LBFGS(x0, solver.memory),
                 solver.tol,
                 solver.ls_tol,
+                solver.D,
             )
         else #SPIRAL
             iter = FINITO_lbfgs_iterable(
@@ -161,6 +159,7 @@ function (solver::Finito{R})(
                 solver.α,
                 LBFGS(x0, solver.memory),
                 solver.ls_tol,
+                solver.D,
             )
         end
     else # Finito/MISO
@@ -254,32 +253,25 @@ function iterator(
     g = ProximalOperators.Zero(),
     L = nothing,
     N = N,
-    F_full = nothing, # finite-sum
-    data   = nothing, # training data for DNN training
+    data = nothing, # training data for DNN training
     DNN_config::Maybe{Tdnn} = nothing
 ) where {R,C<:RealOrComplex{R},Tp,Tdnn}
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
     DNN_config == nothing ? w0 = copy(x0) : w0 = DNN_config()
     if solver.DNN_training
-        iter = FINITO_lbfgs_adaptive_DNN_iterable(
+        iter = FINITO_lbfgs_iterable_DNN(
             F,
-            F_full,
             g,
             x0,
             N,
             L,
             solver.γ,
-            solver.η,
             solver.β,
-            solver.sweeping,
-            solver.minibatch[2],
             solver.α,
             LBFGS(w0, solver.memory),
-            solver.adaptive,
-            solver.tol,
             data,
-            DNN_config
+            DNN_config,
         )
     elseif solver.LFinito # SPIRAL-no-ls
         iter = FINITO_LFinito_iterable(
@@ -310,6 +302,7 @@ function iterator(
                 LBFGS(x0, solver.memory),
                 solver.tol,
                 solver.ls_tol,
+                solver.D,
             )
         else #SPIRAL
             iter = FINITO_lbfgs_iterable(
@@ -325,6 +318,7 @@ function iterator(
                 solver.α,
                 LBFGS(x0, solver.memory),
                 solver.ls_tol,
+                solver.D,
             )
         end
     else # Finito/MISO
@@ -344,4 +338,4 @@ function iterator(
 end
 
 ## TO DO:
-# ls counter in adaptive mode
+# more stable adaptive mode!

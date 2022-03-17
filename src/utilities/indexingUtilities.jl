@@ -7,3 +7,6 @@ function findfst(ind::Array{Int}, idx::Int)
         end
     end     
 end 
+
+batchmemaybe(x) = tuple(x)
+batchmemaybe(x::Tuple) = x

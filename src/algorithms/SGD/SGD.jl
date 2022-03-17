@@ -10,7 +10,7 @@ import ProximalOperators: gradient
 export solution
 
 include("SGD_prox.jl")
-# include("SGD_prox_DNN.jl")
+include("SGD_prox_DNN.jl")
 # include("GD_prox_DNN.jl")
 
 
@@ -142,11 +142,10 @@ function iterator(
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
     if solver.DNN
-        L = 1.0
         if solver.GD
             iter = GD_prox_DNN_iterable(F, g, x0, N, L, μ, solver.γ, solver.diminishing, solver.η0, solver.η_tilde, data, DNN_config)
         else
-            iter = SGD_prox_DNN_iterable(F, g, x0, N, L, μ, solver.γ, solver.diminishing, solver.η0, solver.η_tilde, data, DNN_config)
+            iter = SGD_prox_DNN_iterable(F, g, x0, N, L, solver.γ, solver.diminishing, solver.η0, solver.η_tilde, data, DNN_config)
         end
     else
         iter = SGD_prox_iterable(F, g, x0, N, L, μ, solver.γ, solver.diminishing, solver.η0, solver.η_tilde)

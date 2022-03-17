@@ -12,7 +12,7 @@ struct SGD_prox_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf,Tg}
 end
 
 mutable struct SGD_prox_state{R<:Real,Tx}
-    γ::R                    # stepsize 
+    γ::Maybe{R}             # stepsize 
     z::Tx
     cind::Int               # current interation index
     idxr::Int               # current index
@@ -21,13 +21,14 @@ mutable struct SGD_prox_state{R<:Real,Tx}
     temp::Tx
 end
 
-function SGD_prox_state(γ::R, z::Tx, cind) where {R,Tx}
+function SGD_prox_state(γ::Maybe{R}, z::Tx, cind) where {R,Tx}
     return SGD_prox_state{R,Tx}(γ, z, cind, Int(0), copy(z), copy(z))
 end
 
 function Base.iterate(iter::SGD_prox_iterable{R}) where {R}
     N = iter.N
     ind = collect(1:N)
+    γ = iter.γ
     # updating the stepsize
     if ~iter.diminishing 
         if iter.γ === nothing

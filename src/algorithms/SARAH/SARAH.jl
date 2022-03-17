@@ -13,7 +13,7 @@ export solution
 
 include("SARAH_basic.jl") 
 include("SARAH_prox.jl")
-# include("SARAH_prox_DNN.jl")
+include("SARAH_prox_DNN.jl")
 
 struct SARAH{R<:Real}
     γ::Maybe{R}
@@ -60,7 +60,11 @@ function (solver::SARAH{R})(
     if g == ProximalOperators.Zero()
         iter = SARAH_basic_iterable(F, x0, N, L, μ, solver.γ, m)
     else
-        iter = SARAH_prox_iterable(F, g, x0, N, L, μ, solver.γ, m, solver.ꞵ)
+        if solver.DNN
+            iter = SARAH_prox_DNN_iterable(F, g, x0, N, L, solver.γ, m, solver.ꞵ, data, DNN_config)
+        else
+            iter = SARAH_prox_iterable(F, g, x0, N, L, μ, solver.γ, m, solver.ꞵ)
+        end
     end
 
     iter = take(halt(iter, stop), maxit)
@@ -144,7 +148,7 @@ function iterator(
         iter = SARAH_basic_iterable(F, x0, N, L, μ, solver.γ, m)
     else
         if solver.DNN
-            iter = SARAH_prox_DNN_iterable(F, g, x0, N, L, μ, solver.γ, m, solver.ꞵ, data, DNN_config)
+            iter = SARAH_prox_DNN_iterable(F, g, x0, N, L, solver.γ, m, solver.ꞵ, data, DNN_config)
         else
             iter = SARAH_prox_iterable(F, g, x0, N, L, μ, solver.γ, m, solver.ꞵ)
         end

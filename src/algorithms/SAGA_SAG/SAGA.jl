@@ -37,7 +37,7 @@ struct SAGA{R<:Real}
         verbose::Bool = false,
         freq::Int = 1000,
         SAG_flag::Bool = false,
-        prox_flag::Bool = false,
+        prox_flag::Bool = true,
     ) where {R}
         @assert γ === nothing || γ > 0
         @assert μ === nothing || μ >= 0

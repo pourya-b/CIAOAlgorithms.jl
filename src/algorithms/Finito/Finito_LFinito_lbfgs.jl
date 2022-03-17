@@ -13,6 +13,7 @@ struct FINITO_lbfgs_iterable{R<:Real,C<:RealOrComplex{R},Tx<:AbstractArray{C},Tf
     α::R                    # in (0, 1), e.g.: 0.99
     H::TH                   # LBFGS struct
     ls_tol::R               # tolerance in ls
+    D::Maybe{R}             # a large number to normalize lbfgs direction if provided
 end
 
 mutable struct FINITO_lbfgs_state{R<:Real,Tx, TH}
@@ -76,8 +77,8 @@ function Base.iterate(iter::FINITO_lbfgs_iterable{R}) where {R}
         else
             γ = zeros(R, N)
             for i = 1:N
-                isa(iter.L, R) ? (γ = fill(iter.α * R(iter.N) / iter.L, (N,))) :
-                (γ[i] = iter.α * R(N) / (iter.L[i]))
+                isa(iter.L, R) ? (γ = fill(iter.α / iter.L, (N,))) :
+                (γ[i] = iter.α / (iter.L[i]))
             end
         end
     else
@@ -127,9 +128,11 @@ function Base.iterate(
     # store vectors for next update
     copyto!(state.zbar_prev, state.zbar)
     copyto!(state.res_zbar_prev, state.res_zbar)
-
-
     mul!(state.dir, state.H, state.res_zbar) # updating the quasi-Newton direction
+
+    if iter.D != nothing # normalizing the lbfgs direction
+        state.dir .= state.dir * D * norm(state.v-state.z)/norm(state.dir)
+    end
 
     envVal += real(dot(state.∇f_sum, state.res_zbar)) / iter.N # envelope value (lyapunov function) L(v^k,z^k)
     envVal += norm(state.res_zbar)^2 / (2 *  state.hat_γ)
@@ -155,8 +158,11 @@ function Base.iterate(
         envVal_trial += real(dot(state.∇f_sum, state.z)) / iter.N # envelope value (lyapunov function) L(y^k,u^k)
         envVal_trial += norm(state.z)^2 / (2 *  state.hat_γ)
 
-        envVal_trial <= envVal + iter.ls_tol && break # bug prone!! # descent on the envelope function
-        state.τ *= iter.β # backtracking on τ
+        tol = R(1e-6)*envVal
+        envVal_trial <= envVal + eps(R) && break # descent on the envelope function (Table 1, 5e) # here it seems accurate precisions result in better results. No  stabiliry issues are seen.
+        state.τ *= iter.β   # backtracking on τ
+        println("ls on τ")
+        println("$(envVal_trial) <? $(envVal)")
     end
     state.zbar .= state.z_trial # u^k
 

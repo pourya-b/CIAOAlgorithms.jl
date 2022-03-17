@@ -141,7 +141,7 @@ function Base.iterate(iter::FINITO_lbfgs_adaptive_iterable{R}) where {R}
         else 
             γ = 10 * iter.α * R(iter.N) / minimum(iter.L)
             γ = fill(γ, (N,)) # to make it a vector
-            println("gamma specified by min{L}/10") # This choice of the stepsize seems to give more stable results over the tested datasets and problems. Due to stability issues, the algorithm is sensetive against stepsize initialization
+            println("gamma specified by min{L}/10")
         end
     else
         γ_max = maximum(iter.γ)
@@ -171,6 +171,10 @@ function Base.iterate(
         state.v_prev = zero(iter.x0)
     end
 
+    γ_init = state.hat_γ # to update the individual stepsizes before entering the inner loop, by the change happened to hat_γ over the first 3 ls.
+
+    ls_lhs = 0
+    ls_rhs = 0
     while true # first ls
         if state.hat_γ < iter.tol_b / iter.N
             @warn "parameter `γ` became too small at ls 1, ($(state.hat_γ))"
@@ -189,12 +193,42 @@ function Base.iterate(
         ls_lhs += state.sum_innprod_tz
 
         temp =  (norm(state.z)^2)/(2*state.hat_γ) + (state.sum_nrm_tz)/2 
-        ls_rhs = (1 + iter.ls_tol) * temp - real(dot(state.sum_tz, state.z)) # this choice of tolerance seems more stable, this ls is different from the others as we have already some parameters computed in the previous iteration. For instance, recalculating state.sum_tz is different from updating it with state.sum_tz ./= iter.η. Numerical instability occurs more when we have divisions with γ[i], when these stepsizes are very small due to the backtracks during the linesearchs.
+        ls_rhs = (1 + iter.ls_tol) * temp - real(dot(state.sum_tz, state.z)) # bug prone
         ls_rhs *= iter.N * iter.α       
         
+        # tol = 10^(-6)  * (1 + abs(ls_rhs)) # bug prone
+        # R(ls_lhs) <= ls_rhs + tol && break  # the ls condition (Table 1, 1b)
         ls_lhs <= ls_rhs + iter.ls_tol  && break  # the ls condition (Table 1, 1b)
         println("ls 1")
-               
+        
+        sum_ftz = 0
+        sum_∇ftz = zero(iter.x0)
+        sum_innprod_tz = 0
+        sum_nrm_tz = 0
+        sum_tz = zero(iter.x0)
+        for i in 1:iter.N 
+            sum_ftz += iter.F[i](state.A[i,:])
+            gradient!(state.∇f_temp, iter.F[i], state.A[i,:])
+            sum_∇ftz += state.∇f_temp
+            sum_innprod_tz += real(dot(state.∇f_temp, state.A[i,:]))
+            sum_nrm_tz += norm(state.A[i,:])^2 / state.γ[i]
+            sum_tz += state.A[i,:]/state.γ[i]
+        end 
+
+        ls_rhs_ =  (norm(state.z)^2)/(2*state.hat_γ) + (sum_nrm_tz)/2 - real(dot(sum_tz, state.z)) # bug prone
+        ls_rhs_ *= iter.N * iter.α  
+
+        ls_lhs_ = state.sum_fz #* # lhs and rhs of the ls condition (Table 1, 1b)
+        ls_lhs_ -= real(dot(sum_∇ftz, state.z))
+        ls_lhs_ -= sum_ftz 
+        ls_lhs_ += sum_innprod_tz
+
+        println("lhs : $(ls_lhs)  /  rhs : $(ls_rhs)")
+        println("lhs_: $(ls_lhs_)  /  rhs_: $(ls_rhs_)")
+        println("check: (1) $(sum_nrm_tz)/$(state.sum_nrm_tz - sum_nrm_tz) |  (2) $(real(dot(state.sum_tz, state.z))-real(dot(sum_tz, state.z)))")
+        println("check: (3) $(real(dot(state.sum_∇fu, state.z)) - real(dot(sum_∇ftz, state.z))) |  (4) $(state.sum_innprod_tz-sum_innprod_tz) |  (5) $(state.sum_ftz - sum_ftz)")
+
+        
         γ_prev = state.hat_γ
         state.hat_γ *= iter.η
         state.γ *= iter.η
@@ -204,9 +238,16 @@ function Base.iterate(
         state.sum_nrm_tz /= iter.η
         state.sum_tz ./= iter.η
         reset!(state.H)
-        state.z_prev .= zero(state.s) # we have to update these as well, as it is not considered in the reset function. This update causes instability though!
+        state.z_prev .= zero(state.s)
         state.v_prev .= zero(state.s)
     end   
+    # println("z norm: $(norm(state.z))")
+    # if norm(state.z) == 0
+    #     println("s norm: $(norm(state.s))")
+    #     println("hat_γ: $(norm(state.hat_γ))")
+    #     return nothing
+    # end
+
     # now z^k is fixed, moving to step 2
 
     sum_innprod_z = R(0) # for ls 2
@@ -236,7 +277,9 @@ function Base.iterate(
         ls_lhs += sum_fv
         ls_lhs -= state.sum_fz
 
-        ls_lhs <= ls_rhs + iter.ls_tol && break  # the ls condition (Table 1, 3b) # the tolerance should not be eps(R) necessarily as the arithmetic operations in lhs and rhs of the condition causes tolerances more than machine precision.
+        # tol = 10^(-6)  * (1 + abs(ls_rhs)) # bug prone!
+        # R(ls_lhs) <= ls_rhs + tol && break  # the ls condition (Table 1, 3b)
+        ls_lhs <= ls_rhs + iter.ls_tol && break  # the ls condition (Table 1, 3b)
         println("ls 2")
 
         γ_prev = state.hat_γ
@@ -260,14 +303,16 @@ function Base.iterate(
     # update lbfgs
     update!(state.H, state.z - state.z_prev, state.z-state.v +  state.v_prev) 
     # store vectors for next update
-    copyto!(state.z_prev, state.z)
-    copyto!(state.v_prev, state.v-state.z)
+
     mul!(state.dir, state.H, state.v-state.z) # updating the quasi-Newton direction
     
-    # resetting H with zeroing previous vectors in the ls sometimes results in instability and generating large dir. To avoid very large dir and then linesearch on τ, we normalize the dir vector.
-    if iter.D != nothing # normalizing the direction if necessarily.
+    if iter.D != nothing
         state.dir .= state.dir * D * norm(state.v-state.z)/norm(state.dir)
     end
+
+    print("norm d: $(norm(state.dir))\n | y_s: $(norm(state.z-state.v +  state.v_prev)) / x_s: $(norm(state.z - state.z_prev))")
+    copyto!(state.z_prev, state.z)
+    copyto!(state.v_prev, state.v-state.z)
 
     state.τ = 1
     for i=1:5 # backtracking on τ
@@ -308,10 +353,12 @@ function Base.iterate(
             ls_lhs += sum_fy 
             ls_lhs -= sum_fu 
 
-            ls_lhs <= ls_rhs + iter.ls_tol && break  # the ls condition (Table 1, 5d) # the tolerance should not be eps(R) necessarily as the arithmetic operations in lhs and rhs of the condition causes tolerances more than machine precision.
+            # tol = 10^(-6)  * (1 + abs(envVal_trial)) # bug prone!
+            # ls_lhs <= ls_rhs + tol && break  # the ls condition (Table 1, 5d)
+            ls_lhs <= ls_rhs + iter.ls_tol && break  # the ls condition (Table 1, 5d)
             println("ls 3")
 
-            state.ls_grad_eval += 1 # here we incur extra gradient evaluations, to be counted
+            state.ls_grad_eval += 1
 
             reset!(state.H)
             state.z_prev .= zero(state.s)
@@ -331,6 +378,7 @@ function Base.iterate(
             if iter.D != nothing
                 state.dir .= state.dir * D * norm(state.v-state.z)/norm(state.dir)
             end
+            # print("norm d: $(norm(state.dir))")
 
             # updating the lyapunov function L(v^k,z^k)
             envVal = state.sum_fz / iter.N  
@@ -340,10 +388,21 @@ function Base.iterate(
         end
         envVal_trial += state.val_gy  # envelope value (lyapunov function) L(y^k,u^k)
 
-        envVal_trial <= envVal + eps(R) && break # descent on the envelope function (Table 1, 5e) # here it seems accurate precisions result in better results. No  stabiliry issues are seen.
+        tol = 10^(-8) * (1+abs(envVal)) # bug prone!
+        # envVal_trial <= envVal + tol && break # descent on the envelope function (Table 1, 5e)
+        # envVal_trial <= envVal + iter.ls_tol && break # descent on the envelope function (Table 1, 5e)
+        envVal_trial <= envVal + eps(R) && break # descent on the envelope function (Table 1, 5e)
         state.τ *= iter.β   # backtracking on τ
         println("ls on τ")
     end
+
+    # println("u norm: $(norm(state.u))")
+    # if norm(state.u) == 0
+    #     println("z norm: $(norm(state.z))")
+    #     println("v norm: $(norm(state.v))")
+    #     println("τ: $(norm(state.τ))")
+    #     return nothing
+    # end
 
     state.s .= state.ts # step 6
 
@@ -353,7 +412,10 @@ function Base.iterate(
     state.sum_tz .= zero(state.ts)
     state.sum_innprod_tz =  R(0)
     state.sum_nrm_tz = R(0)
-   
+    state.A = zeros(iter.N,size(iter.x0)[1])
+
+    # state.γ *= (state.hat_γ / γ_init) # updating individual stepsizes before entering the inner-loop
+    
     for j in state.inds # batch indices
         for i in state.ind[j] # in Algorithm 1 line 7, batchsize is 1, but here we are more general - state.ind: indices in the j th batch
             
@@ -369,9 +431,13 @@ function Base.iterate(
 
                 ls_lhs = fi_tz - fi_u - real(dot(state.∇f_temp, state.tz .- state.u))
                 ls_rhs = iter.N * norm(state.tz .- state.u)^2/(2*state.γ[i])
-              
-                ls_lhs <= ls_rhs + iter.ls_tol && break  # the ls condition (Table 1, 8b)                
+
+                # tol = 10^(-6)  * (1 + abs(ls_rhs)) # bug prone!
+                # ls_lhs <= ls_rhs + tol && break  # the ls condition (Table 1, 8b)                
+                ls_lhs <= ls_rhs + iter.ls_tol*(1+ls_rhs) && break  # the ls condition (Table 1, 8b)                
                 println("ls 4")
+                println("lhs : $(ls_lhs)  /  rhs : $(ls_rhs)")
+
 
                 hat_γ_prev = state.hat_γ
                 γ_prev = state.γ[i]
@@ -395,13 +461,23 @@ function Base.iterate(
             state.s .-= (state.hat_γ / iter.N) .* state.∇f_temp
             state.s .+= state.hat_γ * (state.tz .- state.u) ./ state.γ[i]
 
-            # updates for the next linesearch (ls 1). Sometimes these parameters are very large (due to small γ), resulting in many instability issues.
-            state.sum_tz += state.tz / state.γ[i] # these causes instability in ls 1 especially when γ is very small
+            # updates for the next linesearch (ls 1)
+            state.sum_tz += state.tz / state.γ[i]
             state.sum_ftz += fi_tz
-            state.sum_nrm_tz += norm(state.tz)^2 / state.γ[i] # these causes instability in ls 1 especially when γ is very small
+            state.sum_nrm_tz += norm(state.tz)^2 / state.γ[i]
             state.sum_innprod_tz += real(dot(state.∇f_temp, state.tz)) 
+
+            state.A[i,:] .= state.tz
         end
     end
+    println("norm tz: $(state.sum_nrm_tz)")
+    println("min γ: $(minimum(state.γ)) - $(sum(state.A[1,:])) - $(sum(state.A[iter.N,:]))")
+
+    # if norm(state.s) == 0
+    #     println("hat_γ: $(state.hat_γ)")
+    #     println("tz: $(norm(state.tz))")
+    #     println("u: $(norm(state.u))")
+    # end
 
     return state, state
 end
