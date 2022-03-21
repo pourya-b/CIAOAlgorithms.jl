@@ -100,7 +100,7 @@ function (solver::Finito{R})(
 
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
-    if solver.DNN_training
+    if solver.DNN_training # SPIRAL for DNN
         iter = FINITO_lbfgs_iterable_DNN(
             F,
             g,
@@ -259,7 +259,7 @@ function iterator(
     F === nothing && (F = fill(ProximalOperators.Zero(), (N,)))
     # dispatching the iterator
     DNN_config == nothing ? w0 = copy(x0) : w0 = DNN_config()
-    if solver.DNN_training
+    if solver.DNN_training # SPIRAL for DNN
         iter = FINITO_lbfgs_iterable_DNN(
             F,
             g,

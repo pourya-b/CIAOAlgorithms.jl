@@ -99,9 +99,9 @@ function Base.iterate(
 
     for i = 1:iter.N
         gradient!(state.∇f_temp, iter.F[i], state.z)
-        state.∇f_temp .*= -(state.γ[i] / iter.N)
+        state.∇f_temp .*= - Float64(state.γ[i] / iter.N)
         state.∇f_temp .+= state.z
-        @. state.av += (state.∇f_temp - state.s[i]) * (state.hat_γ / state.γ[i])
+        @. state.av += (state.∇f_temp - state.s[i]) * Float64(state.hat_γ / state.γ[i])
         state.s[i] .= state.∇f_temp  #update x_i
 
         prox!(state.z, iter.g, state.av, state.hat_γ)

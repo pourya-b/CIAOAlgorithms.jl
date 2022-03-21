@@ -57,8 +57,8 @@ function Base.iterate(iter::FINITO_LFinito_iterable{R}) where {R}
         else
             γ = zeros(R, N)
             for i = 1:N
-                isa(iter.L, R) ? (γ = fill(iter.α * R(iter.N) / iter.L, (N,))) :
-                (γ[i] = iter.α * R(N) / (iter.L[i]))
+                isa(iter.L, R) ? (γ = fill(iter.α * N / iter.L, (N,))) :
+                (γ[i] = iter.α * N / (iter.L[i]))
             end
         end
     else
